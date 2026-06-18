@@ -1,5 +1,12 @@
 # Power Automate Workflows
 
+> **STAND 18.06.2026:** Flow #1 wurde gebaut und veroeffentlicht. Die exakte,
+> getestete Bauanleitung mit den realen Parsing-Ausdruecken steht in
+> `power-automate-flow1.md`. Dieses Dokument hier ist die urspruengliche
+> Spezifikation (Flows #2 und #3 noch offen). Korrigierte Werte: Status = "Offen"
+> (nicht "Neu"), Tab = "Tabellenblatt1" (nicht "Sheet1").
+
+
 Drei Cloud-Flows verbinden das eingehende E-Mail-Postfach und die Reminder-Logik
 mit dem Google Sheet ueber die Netlify Function bzw. die Google Sheets REST API.
 
@@ -28,7 +35,7 @@ mit dem Google Sheet ueber die Netlify Function bzw. die Google Sheets REST API.
      - keine Zeit -> leer
 
 3. **HTTP POST (anhaengen)**
-   - URI: `https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values/Sheet1:append`
+   - URI: `https://sheets.googleapis.com/v4/spreadsheets/{SHEET_ID}/values/Tabellenblatt1:append`
    - Header: `Content-Type: application/json`, `Authorization: Bearer <Token>`
    - Body: `{ "values": [[ID, Datum, Quelle, Name, Tel, Email, Anliegen, Prioritaet, Status, Bearbeiter, FupDatum, FupZeit, Notizen, History, ReminderStatus]] }`
 
@@ -75,7 +82,7 @@ mit dem Google Sheet ueber die Netlify Function bzw. die Google Sheets REST API.
 **Actions:**
 
 1. **HTTP GET** des Sheets (wie Flow #2).
-2. **Filter:** Status == "Neu" ODER Prioritaet == "Sofort", eingangsdatum >= gestern.
+2. **Filter:** Status == "Offen" ODER Prioritaet == "Sofort", eingangsdatum >= gestern.
 3. **HTML-E-Mail bauen** mit Tabelle (Name, Telefon, Anliegen, Prioritaet) und Statistik
    (Anzahl je Status) plus Dashboard-Link.
 4. **E-Mail senden**

@@ -6,7 +6,7 @@
 const { google } = require('googleapis');
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
-const RANGE = 'Sheet1!A2:O1000';
+// Tab-Name wird dynamisch ermittelt (robust gegen 'Tabellenblatt1' vs 'Sheet1')
 
 // Spalten-Reihenfolge entspricht dem Sheet-Schema A..O
 const COLUMNS = [
@@ -40,6 +40,14 @@ function getSheets() {
   const auth = getAuth();
   return google.sheets({ version: 'v4', auth });
 }
+
+// Ersten Tab-Namen ermitteln (robust gegen Sprach-/Namensunterschiede)
+async function ersterTabName(sheets, spreadsheetId) {
+  const meta = await sheets.spreadsheets.get({ spreadsheetId, fields: 'sheets.properties.title' });
+  const titel = meta.data.sheets && meta.data.sheets[0] && meta.data.sheets[0].properties.title;
+  return titel || 'Tabelle1';
+}
+
 
 // ---- Zeile (Array) -> Objekt ----
 function rowToObject(row) {
@@ -92,6 +100,8 @@ exports.handler = async (event) => {
 
   try {
     const sheets = getSheets();
+    const tab = await ersterTabName(sheets, SHEET_ID);
+    const RANGE = tab + '!A2:O1000';
 
     // -------------------- READ --------------------
     if (event.httpMethod === 'GET') {
@@ -121,7 +131,7 @@ exports.handler = async (event) => {
       if (values.length > 0) {
         await sheets.spreadsheets.values.update({
           spreadsheetId: SHEET_ID,
-          range: 'Sheet1!A2',
+          range: tab + '!A2',
           valueInputOption: 'USER_ENTERED',
           requestBody: { values },
         });

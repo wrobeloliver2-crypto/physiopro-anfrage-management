@@ -1,44 +1,34 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Plus,
-  Phone,
-  Mail,
-  Clock,
-  AlertTriangle,
-  ChevronDown,
-  ChevronUp,
-  X,
-  Trash2,
-  Edit3,
-  Calendar,
-  User,
+  Plus, Phone, Mail, Clock, AlertTriangle, ChevronDown, ChevronUp,
+  X, Trash2, Calendar, User, Globe, Check, RefreshCw, StickyNote,
+  PhoneCall, Pin,
 } from 'lucide-react';
 
 // ====================================================================
-// Konstanten / Konfiguration
+// Konfiguration
 // ====================================================================
-const API_URL = '/.netlify/functions/sheets-api';
+const BACKEND_BASE =
+  import.meta.env.VITE_BACKEND_BASE || 'https://leadmanagementphysiopro.netlify.app';
+const API_URL = BACKEND_BASE + '/.netlify/functions/sheets-api';
+const NOTES_URL = BACKEND_BASE + '/.netlify/functions/notes-api';
 
-const STATUS = ['Neu', 'Angeboten', 'In Bearbeitung', 'Erledigt'];
-const PRIORITAETEN = ['Sofort', 'Normal', 'Spaeter'];
-const BEARBEITER = [
-  'Luca',
-  'Finn',
-  'Annika',
-  'Oliver Wrobel',
-  'Hanna Wrobel',
-  'Unzugewiesen',
-];
+const SPALTEN = ['Offen', 'In Bearbeitung', 'To Do'];
+const ALLE_STATUS = ['Offen', 'In Bearbeitung', 'To Do', 'Erledigt'];
+const PRIORITAETEN = ['Sofort', 'Normal', 'Niedrig'];
+const BEARBEITER = ['Luca', 'Finn', 'Annika', 'Oliver Wrobel', 'Hanna Wrobel', 'Unzugewiesen'];
 const QUELLEN = ['Website', 'Telefon-Benachrichtigung', 'Manuell erfasst'];
-
-// Read-only Benutzer (Leads) - duerfen nur lesen
 const READ_ONLY_USERS = ['Oliver Wrobel', 'Hanna Wrobel'];
 
-const STATUS_FARBEN = {
-  Neu: 'bg-blue-100 text-blue-800 border-blue-200',
-  Angeboten: 'bg-amber-100 text-amber-800 border-amber-200',
-  'In Bearbeitung': 'bg-purple-100 text-purple-800 border-purple-200',
-  Erledigt: 'bg-green-100 text-green-800 border-green-200',
+const SPALTEN_AKZENT = {
+  'Offen': '#55725e',
+  'In Bearbeitung': '#8c7660',
+  'To Do': '#b8742a',
+};
+const PRIO_STYLE = {
+  Sofort: { rand: '#c0392b', text: '#c0392b', bg: '#fbeae8', label: 'Sofort' },
+  Normal: { rand: '#55725e', text: '#3d5445', bg: '#eef3f0', label: 'Normal' },
+  Niedrig: { rand: '#c4b09a', text: '#8c7660', bg: '#f7f0e8', label: 'Niedrig' },
 };
 
 // ====================================================================
@@ -46,36 +36,27 @@ const STATUS_FARBEN = {
 // ====================================================================
 const heute = () => new Date().toISOString().slice(0, 10);
 const jetztISO = () => new Date().toISOString();
-
-function neueId() {
-  return 'temp-' + Date.now();
-}
-
-// History-Eintrag erstellen
+const neueId = () => 'temp-' + Date.now();
+const uhrzeit = (iso) => {
+  try { return new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }); }
+  catch { return ''; }
+};
 function historyEintrag(aktion, von, details) {
   return { zeitstempel: jetztISO(), aktion, von, details };
 }
-
-// Linearer Status-Flow: nur naechster Schritt erlaubt (oder zurueck zu Neu)
-function naechsterErlaubt(aktuell, ziel) {
-  const i = STATUS.indexOf(aktuell);
-  const j = STATUS.indexOf(ziel);
-  if (j === i) return false;
-  return j === i + 1; // nur ein Schritt vorwaerts
-}
-
-// Follow-up faellig?
 function followupFaellig(a) {
   if (!a.followupDatum) return false;
   const ziel = a.followupDatum + (a.followupZeit ? 'T' + a.followupZeit : 'T23:59');
   return new Date(ziel) < new Date() && a.status !== 'Erledigt';
 }
+const istHeute = (d) => d === heute();
 
 // ====================================================================
 // Haupt-Komponente
 // ====================================================================
 export default function App() {
   const [anfragen, setAnfragen] = useState([]);
+  const [notizen, setNotizen] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState(
     () => localStorage.getItem('currentUser') || 'Luca'
@@ -83,269 +64,259 @@ export default function App() {
   const [showNewForm, setShowNewForm] = useState(false);
   const [selectedAnfrage, setSelectedAnfrage] = useState(null);
   const [error, setError] = useState(null);
+  const [letzteAenderung, setLetzteAenderung] = useState(null);
 
   const isReadOnly = READ_ONLY_USERS.includes(currentUser);
 
-  // ---- Startup: Daten laden ----
+  useEffect(() => { loadFromSheets(); loadNotes(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { localStorage.setItem('currentUser', currentUser); }, [currentUser]);
   useEffect(() => {
-    loadFromSheets();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const t = setInterval(() => { loadFromSheets(); loadNotes(); }, 60000);
+    return () => clearInterval(t); /* eslint-disable-next-line */
   }, []);
 
-  // ---- currentUser persistieren ----
-  useEffect(() => {
-    localStorage.setItem('currentUser', currentUser);
-  }, [currentUser]);
-
-  // ---- Laden mit Retry ----
   const loadFromSheets = useCallback(async (versuch = 0) => {
-    setLoading(true);
-    setError(null);
+    setLoading(true); setError(null);
     try {
       const res = await fetch(API_URL, { method: 'GET' });
       if (res.status === 403) throw new Error('Keine Berechtigung fuer Google Sheet');
       if (res.status === 429) throw new Error('Zu viele Anfragen. Bitte warten...');
       if (!res.ok) throw new Error('Verbindung fehlgeschlagen');
       const json = await res.json();
-      setAnfragen(Array.isArray(json.data) ? json.data : []);
+      const data = Array.isArray(json.data) ? json.data : [];
+      const migriert = data.map((a) => {
+        let s = a.status;
+        if (s === 'Neu') s = 'Offen';
+        else if (s === 'Angeboten') s = 'In Bearbeitung';
+        return { ...a, status: s };
+      });
+      setAnfragen(migriert);
+      setLetzteAenderung(new Date());
     } catch (e) {
-      if (versuch < 2) {
-        setTimeout(() => loadFromSheets(versuch + 1), 3000);
-        return;
-      }
+      if (versuch < 2) { setTimeout(() => loadFromSheets(versuch + 1), 3000); return; }
       setError(e.message || 'Verbindung fehlgeschlagen');
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }, []);
 
-  // ---- Speichern (Auto-Save) ----
+  const loadNotes = useCallback(async () => {
+    try {
+      const res = await fetch(NOTES_URL, { method: 'GET' });
+      if (!res.ok) return;
+      const json = await res.json();
+      setNotizen(Array.isArray(json.data) ? json.data : []);
+    } catch { /* optional */ }
+  }, []);
+
   const saveToSheets = useCallback(async (data) => {
     try {
       const res = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ anfragen: data }),
       });
       if (!res.ok) throw new Error('Speichern fehlgeschlagen');
-    } catch (e) {
-      setError('Verbindung fehlgeschlagen - Aenderung evtl. nicht gespeichert');
-    }
+      setLetzteAenderung(new Date());
+    } catch { setError('Verbindung fehlgeschlagen - Aenderung evtl. nicht gespeichert'); }
   }, []);
+  const persist = (data) => { setAnfragen(data); saveToSheets(data); };
 
-  // Persistiert eine neue Liste und aktualisiert den State
-  const persist = (data) => {
-    setAnfragen(data);
-    saveToSheets(data);
-  };
+  const saveNotes = useCallback(async (data) => {
+    try {
+      await fetch(NOTES_URL, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notizen: data }),
+      });
+      setLetzteAenderung(new Date());
+    } catch { setError('Notiz konnte evtl. nicht gespeichert werden'); }
+  }, []);
+  const persistNotes = (data) => { setNotizen(data); saveNotes(data); };
 
-  // ---- Duplikat-Pruefung ----
   const checkDuplicate = (name, telefon) =>
-    anfragen.find(
-      (a) =>
-        a.name.toLowerCase() === name.toLowerCase() &&
-        a.telefon === telefon &&
-        a.status !== 'Erledigt'
-    );
+    anfragen.find((a) => a.name.toLowerCase() === name.toLowerCase() &&
+      a.telefon === telefon && a.status !== 'Erledigt');
 
-  // ---- Neue Anfrage ----
   const addAnfrage = (data) => {
     const neu = {
-      id: neueId(),
-      eingangsdatum: heute(),
-      quelle: data.quelle,
-      name: data.name,
-      telefon: data.telefon,
-      email: data.email || '',
-      anliegen: data.anliegen,
-      prioritaet: data.prioritaet,
-      status: 'Neu',
-      bearbeiter: 'Unzugewiesen',
-      followupDatum: '',
-      followupZeit: '',
-      notizen: '',
-      history: [historyEintrag('Erstellt', currentUser, 'Manuell erfasst')],
+      id: neueId(), eingangsdatum: heute(), quelle: data.quelle,
+      name: data.name, telefon: data.telefon, email: data.email || '',
+      anliegen: data.anliegen, prioritaet: data.prioritaet, status: 'Offen',
+      bearbeiter: 'Unzugewiesen', followupDatum: '', followupZeit: '',
+      notizen: '', history: [historyEintrag('Erstellt', currentUser, 'Manuell erfasst')],
       reminderStatus: '',
     };
-    persist([...anfragen, neu]);
-    setShowNewForm(false);
+    persist([...anfragen, neu]); setShowNewForm(false);
   };
-
-  // ---- Merge in bestehende Anfrage ----
   const mergeAnfrage = (bestehend, data) => {
-    const updated = anfragen.map((a) =>
-      a.id === bestehend.id
-        ? {
-            ...a,
-            anliegen: a.anliegen + ' | ' + data.anliegen,
-            history: [
-              ...a.history,
-              historyEintrag('Aktualisiert', currentUser, 'Erneute Anfrage zusammengefuehrt'),
-            ],
-          }
-        : a
-    );
-    persist(updated);
-    setShowNewForm(false);
+    const updated = anfragen.map((a) => a.id === bestehend.id
+      ? { ...a, anliegen: a.anliegen + ' | ' + data.anliegen,
+          history: [...a.history, historyEintrag('Aktualisiert', currentUser, 'Erneute Anfrage zusammengefuehrt')] }
+      : a);
+    persist(updated); setShowNewForm(false);
   };
-
-  // ---- Anfrage aktualisieren ----
   const updateAnfrage = (updated, beschreibung = 'Aktualisiert') => {
-    const data = anfragen.map((a) =>
-      a.id === updated.id
-        ? {
-            ...updated,
-            history: [
-              ...(updated.history || []),
-              historyEintrag('Aktualisiert', currentUser, beschreibung),
-            ],
-          }
-        : a
-    );
-    persist(data);
-    setSelectedAnfrage(null);
+    const data = anfragen.map((a) => a.id === updated.id
+      ? { ...updated, history: [...(updated.history || []), historyEintrag('Aktualisiert', currentUser, beschreibung)] }
+      : a);
+    persist(data); setSelectedAnfrage(null);
   };
-
-  // ---- Status wechseln (linearer Flow) ----
   const changeStatus = (anfrage, neuerStatus) => {
-    if (!naechsterErlaubt(anfrage.status, neuerStatus)) {
-      alert('Statuswechsel nur in dieser Reihenfolge: Neu -> Angeboten -> In Bearbeitung -> Erledigt');
-      return;
-    }
-    const data = anfragen.map((a) =>
-      a.id === anfrage.id
-        ? {
-            ...a,
-            status: neuerStatus,
-            history: [
-              ...a.history,
-              historyEintrag('Status geaendert', currentUser, anfrage.status + ' -> ' + neuerStatus),
-            ],
-          }
-        : a
-    );
+    const data = anfragen.map((a) => a.id === anfrage.id
+      ? { ...a, status: neuerStatus,
+          history: [...a.history, historyEintrag('Status geaendert', currentUser, anfrage.status + ' -> ' + neuerStatus)] }
+      : a);
     persist(data);
     setSelectedAnfrage((prev) => (prev ? { ...prev, status: neuerStatus } : prev));
   };
-
-  // ---- Loeschen ----
   const deleteAnfrage = (anfrage) => {
     if (!window.confirm('Anfrage von ' + anfrage.name + ' wirklich loeschen?')) return;
-    persist(anfragen.filter((a) => a.id !== anfrage.id));
-    setSelectedAnfrage(null);
+    persist(anfragen.filter((a) => a.id !== anfrage.id)); setSelectedAnfrage(null);
   };
+  const addNotiz = (text) => {
+    if (!text.trim()) return;
+    persistNotes([...notizen, { id: neueId(), text: text.trim(), autor: currentUser, zeit: jetztISO() }]);
+  };
+  const deleteNotiz = (id) => persistNotes(notizen.filter((n) => n.id !== id));
 
-  // ================================================================
-  // Render
-  // ================================================================
+  const offeneCount = anfragen.filter((a) => a.status === 'Offen').length;
+  const sofortCount = anfragen.filter((a) => a.status !== 'Erledigt' && a.prioritaet === 'Sofort').length;
+  const erledigtHeute = useMemo(
+    () => anfragen.filter((a) => a.status === 'Erledigt' && istHeute(a.eingangsdatum)).length,
+    [anfragen]
+  );
+
   return (
-    <div className="fixed inset-0 bg-gray-200/70 flex items-center justify-center p-4 sm:p-6 lg:p-10">
-      {/* Schwebendes Panel */}
-      <div className="w-full max-w-screen-2xl h-full max-h-[calc(100vh-3rem)] bg-gray-100 rounded-2xl shadow-2xl ring-1 ring-black/10 flex flex-col overflow-hidden">
-      {/* Header */}
-      <header className="bg-physiopro text-white shadow shrink-0">
-        <div className="px-4 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold">PhysioPro Anfrage-Management</h1>
-            <p className="text-sm text-green-100">Rezeption Luebeck - Dashboard</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <label className="sr-only" htmlFor="user-select">Benutzer</label>
-            <select
-              id="user-select"
-              aria-label="Benutzer auswaehlen"
-              value={currentUser}
-              onChange={(e) => setCurrentUser(e.target.value)}
-              className="text-gray-800 rounded px-2 py-1 text-sm"
-            >
-              {BEARBEITER.filter((b) => b !== 'Unzugewiesen').map((b) => (
-                <option key={b} value={b}>{b}</option>
-              ))}
-            </select>
-            {!isReadOnly && (
-              <button
-                onClick={() => setShowNewForm(true)}
-                className="bg-white text-physiopro font-medium rounded px-3 py-1.5 text-sm flex items-center gap-1 hover:bg-green-50"
-              >
-                <Plus size={16} /> Neue Anfrage
-              </button>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {/* Error Toast */}
-      {error && (
-        <div className="px-4 mt-3 shrink-0">
-          <div className="bg-red-100 border border-red-300 text-red-800 rounded px-4 py-2 text-sm flex items-center justify-between">
+    <div className="app-shell">
+      <div className="panel">
+        <Titlebar />
+        <Kopfzeile
+          offeneCount={offeneCount} sofortCount={sofortCount} erledigtHeute={erledigtHeute}
+          letzteAenderung={letzteAenderung} currentUser={currentUser}
+          setCurrentUser={setCurrentUser} isReadOnly={isReadOnly}
+          onNeu={() => setShowNewForm(true)}
+        />
+        {error && (
+          <div className="fehler-leiste">
             <span>{error}</span>
-            <button onClick={() => loadFromSheets()} className="underline">Erneut versuchen</button>
-          </div>
-        </div>
-      )}
-
-      {/* Board */}
-      <main className="flex-1 overflow-y-auto px-4 py-6">
-        {loading ? (
-          <div className="flex flex-col items-center justify-center py-24 text-gray-500">
-            <div className="animate-spin h-8 w-8 border-4 border-physiopro border-t-transparent rounded-full mb-3" />
-            <span>Daten laden...</span>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            {STATUS.map((status) => (
-              <StatusColumn
-                key={status}
-                status={status}
-                anfragen={anfragen.filter((a) => a.status === status)}
-                onCardClick={setSelectedAnfrage}
-              />
-            ))}
+            <button onClick={() => loadFromSheets()}>Erneut versuchen</button>
           </div>
         )}
-      </main>
-
-      {/* Modals */}
-      {selectedAnfrage && (
-        <AnfragenModal
-          anfrage={selectedAnfrage}
-          isReadOnly={isReadOnly}
-          onClose={() => setSelectedAnfrage(null)}
-          onSave={updateAnfrage}
-          onStatusChange={changeStatus}
-          onDelete={deleteAnfrage}
-        />
-      )}
-      {showNewForm && !isReadOnly && (
-        <NeueAnfrageForm
-          onClose={() => setShowNewForm(false)}
-          onSubmit={addAnfrage}
-          onMerge={mergeAnfrage}
-          checkDuplicate={checkDuplicate}
-        />
-      )}
+        <main className="board-bereich">
+          {loading && anfragen.length === 0 ? (
+            <div className="lade-zustand"><div className="spinner" /><span>Daten laden…</span></div>
+          ) : (
+            <div className="spalten-grid">
+              {SPALTEN.map((status) => (
+                <StatusSpalte key={status} status={status}
+                  anfragen={anfragen.filter((a) => a.status === status)}
+                  onCardClick={setSelectedAnfrage} />
+              ))}
+            </div>
+          )}
+          <UebergabeNotizen notizen={notizen} isReadOnly={isReadOnly}
+            onAdd={addNotiz} onDelete={deleteNotiz} />
+        </main>
+        {selectedAnfrage && (
+          <AnfragenModal anfrage={selectedAnfrage} isReadOnly={isReadOnly}
+            onClose={() => setSelectedAnfrage(null)} onSave={updateAnfrage}
+            onStatusChange={changeStatus} onDelete={deleteAnfrage} />
+        )}
+        {showNewForm && !isReadOnly && (
+          <NeueAnfrageForm onClose={() => setShowNewForm(false)} onSubmit={addAnfrage}
+            onMerge={mergeAnfrage} checkDuplicate={checkDuplicate} />
+        )}
       </div>
     </div>
   );
 }
 
 // ====================================================================
-// StatusColumn
+// Titlebar
 // ====================================================================
-function StatusColumn({ status, anfragen, onCardClick }) {
+function Titlebar() {
+  const [pinned, setPinned] = useState(true);
+  const togglePin = async () => {
+    const next = !pinned; setPinned(next);
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      await getCurrentWindow().setAlwaysOnTop(next);
+    } catch { /* Browser */ }
+  };
   return (
-    <section className="bg-gray-50 rounded-lg border border-gray-200 flex flex-col">
-      <div className={'rounded-t-lg px-3 py-2 border-b font-semibold text-sm flex items-center justify-between ' + STATUS_FARBEN[status]}>
-        <span>{status}</span>
-        <span className="bg-white/70 rounded-full px-2 text-xs">{anfragen.length}</span>
+    <div className="titlebar" data-tauri-drag-region>
+      <div className="titlebar-left" data-tauri-drag-region>
+        <span className="ampel" />
+        <span className="titlebar-text">PhysioPro Rezeption</span>
       </div>
-      <div className="p-2 space-y-2 min-h-[120px]">
-        {anfragen.map((a) => (
-          <AnfragenKarte key={a.id} anfrage={a} onClick={() => onCardClick(a)} />
-        ))}
-        {anfragen.length === 0 && (
-          <p className="text-xs text-gray-400 text-center py-4">Keine Anfragen</p>
+      <div className="titlebar-right">
+        <button className={'pin-btn' + (pinned ? ' pin-aktiv' : '')} onClick={togglePin}
+          title={pinned ? 'Immer im Vordergrund: AN' : 'Immer im Vordergrund: AUS'}
+          aria-label="Immer im Vordergrund umschalten">
+          <Pin size={14} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ====================================================================
+// Kopfzeile
+// ====================================================================
+function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, letzteAenderung,
+  currentUser, setCurrentUser, isReadOnly, onNeu }) {
+  const aenderungsZeit = letzteAenderung
+    ? letzteAenderung.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+    : '—';
+  return (
+    <div className="kopfzeile">
+      <div className="kopf-links">
+        <div>
+          <h1 className="kopf-titel">Rezeptionsdashboard</h1>
+          <div className="kopf-zeitstempel">
+            <RefreshCw size={10} /> Letzte Änderung {aenderungsZeit}
+          </div>
+        </div>
+        <div className="erledigt-chip">
+          <Check size={13} />
+          <span>{erledigtHeute} heute erledigt</span>
+        </div>
+      </div>
+      <div className="kopf-rechts">
+        <span className="kopf-stats">{offeneCount} offen{sofortCount > 0 ? ' · ' + sofortCount + ' sofort' : ''}</span>
+        <select className="user-select" aria-label="Benutzer auswaehlen"
+          value={currentUser} onChange={(e) => setCurrentUser(e.target.value)}>
+          {BEARBEITER.filter((b) => b !== 'Unzugewiesen').map((b) => (
+            <option key={b} value={b}>{b}</option>
+          ))}
+        </select>
+        {!isReadOnly && (
+          <button className="neu-btn" onClick={onNeu}>
+            <Plus size={14} /> Eintrag
+          </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ====================================================================
+// StatusSpalte
+// ====================================================================
+function StatusSpalte({ status, anfragen, onCardClick }) {
+  const akzent = SPALTEN_AKZENT[status];
+  const istTodo = status === 'To Do';
+  return (
+    <section className="spalte">
+      <div className="spalte-kopf">
+        <span className="spalte-titel" style={{ color: akzent }}>{status}</span>
+        <span className="spalte-zaehler" style={{
+          background: istTodo || status === 'Offen' ? akzent : '#f2ede6',
+          color: istTodo || status === 'Offen' ? '#fff' : '#8c7660',
+        }}>{anfragen.length}</span>
+      </div>
+      <div className="spalte-karten">
+        {anfragen.map((a) => (
+          <AnfragenKarte key={a.id} anfrage={a} istTodo={istTodo} onClick={() => onCardClick(a)} />
+        ))}
+        {anfragen.length === 0 && <p className="spalte-leer">Keine Einträge</p>}
       </div>
     </section>
   );
@@ -354,37 +325,80 @@ function StatusColumn({ status, anfragen, onCardClick }) {
 // ====================================================================
 // AnfragenKarte
 // ====================================================================
-function AnfragenKarte({ anfrage, onClick }) {
-  const isPriority = anfrage.prioritaet === 'Sofort';
+function AnfragenKarte({ anfrage, istTodo, onClick }) {
+  const prio = PRIO_STYLE[anfrage.prioritaet] || PRIO_STYLE.Normal;
   const faellig = followupFaellig(anfrage);
+  const quelleIcon = anfrage.quelle === 'Telefon-Benachrichtigung'
+    ? <Phone size={11} /> : <Globe size={11} />;
   return (
-    <button
-      onClick={onClick}
-      className="w-full text-left bg-white rounded-md border border-gray-200 p-3 shadow-sm hover:shadow transition"
-    >
-      <div className="flex items-start justify-between">
-        <span className="font-medium text-gray-800">{anfrage.name}</span>
-        {isPriority && (
-          <span className="bg-red-100 text-red-700 text-xs rounded px-1.5 py-0.5 font-semibold">Sofort</span>
+    <button className={'karte' + (istTodo ? ' karte-todo' : '')} onClick={onClick}
+      style={{ borderLeftColor: istTodo ? '#d99a3a' : prio.rand }}>
+      <div className="karte-kopf">
+        <span className="karte-name">{anfrage.name}</span>
+        {istTodo ? (
+          <AlertTriangle size={12} color="#b8742a" />
+        ) : (
+          <span className="karte-prio" style={{ color: prio.text, background: prio.bg }}>
+            {prio.label}
+          </span>
         )}
       </div>
-      <p className="text-xs text-gray-500 mt-1 line-clamp-2">{anfrage.anliegen}</p>
-      <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-500">
-        {anfrage.telefon && (
-          <span className="flex items-center gap-1"><Phone size={12} />{anfrage.telefon}</span>
-        )}
-        {anfrage.bearbeiter && anfrage.bearbeiter !== 'Unzugewiesen' && (
-          <span className="flex items-center gap-1"><User size={12} />{anfrage.bearbeiter}</span>
+      <p className="karte-anliegen">{anfrage.anliegen}</p>
+      <div className="karte-meta">
+        {anfrage.bearbeiter && anfrage.bearbeiter !== 'Unzugewiesen' ? (
+          <span className="karte-meta-item"><User size={11} />{anfrage.bearbeiter}</span>
+        ) : (
+          <span className="karte-meta-item">{quelleIcon}{anfrage.quelle === 'Telefon-Benachrichtigung' ? 'Telefon' : anfrage.quelle === 'Website' ? 'Webformular' : 'Manuell'}</span>
         )}
       </div>
       {anfrage.followupDatum && (
-        <div className={'mt-2 text-xs flex items-center gap-1 ' + (faellig ? 'text-orange-600 font-semibold' : 'text-gray-500')}>
-          <Clock size={12} />
-          {faellig ? 'Follow-up faellig! ' : 'Anruf: '}
-          {anfrage.followupDatum} {anfrage.followupZeit}
+        <div className={'karte-followup' + (faellig ? ' faellig' : '')}>
+          <Clock size={11} />
+          {faellig ? 'Fällig: ' : 'Termin: '}{anfrage.followupDatum} {anfrage.followupZeit}
         </div>
       )}
     </button>
+  );
+}
+
+// ====================================================================
+// UebergabeNotizen
+// ====================================================================
+function UebergabeNotizen({ notizen, isReadOnly, onAdd, onDelete }) {
+  const [text, setText] = useState('');
+  const absenden = () => { if (text.trim()) { onAdd(text); setText(''); } };
+  return (
+    <div className="notizen-box">
+      <div className="notizen-kopf">
+        <span className="notizen-titel"><StickyNote size={15} /> Übergabe-Notizen</span>
+        <span className="notizen-sub">für die nächste Schicht</span>
+      </div>
+      <div className="notizen-liste">
+        {notizen.length === 0 && <p className="notizen-leer">Noch keine Notizen für die Übergabe.</p>}
+        {notizen.map((n) => (
+          <div className="notiz" key={n.id}>
+            <span className="notiz-punkt" />
+            <div className="notiz-inhalt">
+              <div className="notiz-text">{n.text}</div>
+              <div className="notiz-meta">{uhrzeit(n.zeit)} · {n.autor}</div>
+            </div>
+            {!isReadOnly && (
+              <button className="notiz-loeschen" onClick={() => onDelete(n.id)} aria-label="Notiz loeschen">
+                <X size={13} />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      {!isReadOnly && (
+        <div className="notiz-neu">
+          <input type="text" value={text} placeholder="Notiz für die nächste Schicht hinzufügen …"
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') absenden(); }} />
+          <button onClick={absenden} disabled={!text.trim()}><Plus size={14} /></button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -394,115 +408,105 @@ function AnfragenKarte({ anfrage, onClick }) {
 function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, onDelete }) {
   const [form, setForm] = useState({ ...anfrage });
   const [showHistory, setShowHistory] = useState(false);
-
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={onClose}>
-      <div className="bg-white rounded-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
-        <div className="bg-physiopro text-white px-5 py-3 flex items-center justify-between sticky top-0">
-          <h2 className="font-semibold">{anfrage.name}</h2>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-kopf">
+          <h2>{anfrage.name}</h2>
           <button onClick={onClose} aria-label="Schliessen"><X size={20} /></button>
         </div>
-
-        <div className="p-5 space-y-4">
-          {/* Info Cards */}
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <InfoCard icon={<Calendar size={14} />} label="Eingangsdatum" value={anfrage.eingangsdatum} />
+        <div className="modal-body">
+          <div className="info-grid">
+            <InfoCard icon={<Calendar size={14} />} label="Eingang" value={anfrage.eingangsdatum} />
             <InfoCard icon={<Phone size={14} />} label="Telefon" value={anfrage.telefon || '-'} />
-            <InfoCard icon={<Mail size={14} />} label="Email" value={anfrage.email || '-'} />
-            <InfoCard icon={<User size={14} />} label="Quelle" value={anfrage.quelle} />
+            <InfoCard icon={<Mail size={14} />} label="E-Mail" value={anfrage.email || '-'} />
+            <InfoCard icon={<Globe size={14} />} label="Quelle" value={anfrage.quelle} />
           </div>
 
-          <div>
-            <span className="text-xs font-medium text-gray-500">Anliegen</span>
-            <p className="text-sm text-gray-800">{anfrage.anliegen}</p>
+          <div className="feld">
+            <label>Anliegen</label>
+            {isReadOnly ? <p className="feld-wert">{anfrage.anliegen}</p>
+              : <textarea value={form.anliegen} onChange={(e) => set('anliegen', e.target.value)} rows={2} />}
           </div>
 
-          {/* Editable Felder */}
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Prioritaet">
-              <select disabled={isReadOnly} value={form.prioritaet}
-                onChange={(e) => set('prioritaet', e.target.value)}
-                className="w-full border rounded px-2 py-1 text-sm disabled:bg-gray-100">
-                {PRIORITAETEN.map((p) => <option key={p}>{p}</option>)}
-              </select>
-            </Field>
-            <Field label="Bearbeiter">
-              <select disabled={isReadOnly} value={form.bearbeiter}
-                onChange={(e) => set('bearbeiter', e.target.value)}
-                className="w-full border rounded px-2 py-1 text-sm disabled:bg-gray-100">
-                {BEARBEITER.map((b) => <option key={b}>{b}</option>)}
-              </select>
-            </Field>
-            <Field label="Follow-up Datum">
-              <input type="date" disabled={isReadOnly} value={form.followupDatum}
-                onChange={(e) => set('followupDatum', e.target.value)}
-                className="w-full border rounded px-2 py-1 text-sm disabled:bg-gray-100" />
-            </Field>
-            <Field label="Follow-up Zeit">
-              <input type="time" disabled={isReadOnly} value={form.followupZeit}
-                onChange={(e) => set('followupZeit', e.target.value)}
-                className="w-full border rounded px-2 py-1 text-sm disabled:bg-gray-100" />
-            </Field>
-          </div>
-
-          <Field label="Notizen (max 500 Zeichen)">
-            <textarea disabled={isReadOnly} maxLength={500} rows={3} value={form.notizen}
-              onChange={(e) => set('notizen', e.target.value)}
-              className="w-full border rounded px-2 py-1 text-sm disabled:bg-gray-100" />
-          </Field>
-
-          {/* Status Buttons (linearer Flow) */}
-          <div>
-            <span className="text-xs font-medium text-gray-500">Status</span>
-            <div className="flex flex-wrap gap-2 mt-1">
-              {STATUS.map((s) => (
-                <button key={s} disabled={isReadOnly || s === anfrage.status}
-                  onClick={() => onStatusChange(anfrage, s)}
-                  className={'text-xs rounded px-2 py-1 border ' +
-                    (s === anfrage.status ? STATUS_FARBEN[s] + ' font-semibold' : 'bg-white text-gray-600 hover:bg-gray-50') +
-                    ' disabled:opacity-50'}>
-                  {s}
-                </button>
-              ))}
+          <div className="feld-reihe">
+            <div className="feld">
+              <label>Status</label>
+              {isReadOnly ? <p className="feld-wert">{anfrage.status}</p> : (
+                <div className="status-buttons">
+                  {ALLE_STATUS.map((s) => (
+                    <button key={s} className={'status-btn' + (anfrage.status === s ? ' aktiv' : '')}
+                      onClick={() => onStatusChange(anfrage, s)}>{s}</button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
-          {/* History */}
-          <div className="border-t pt-3">
-            <button onClick={() => setShowHistory((s) => !s)}
-              className="flex items-center gap-1 text-sm font-medium text-gray-700">
-              {showHistory ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-              Aenderungs-History ({(anfrage.history || []).length})
-            </button>
-            {showHistory && (
-              <ul className="mt-2 space-y-2 max-h-48 overflow-y-auto text-xs">
-                {[...(anfrage.history || [])].reverse().map((h, i) => (
-                  <li key={i} className="border-l-2 border-physiopro pl-2">
-                    <span className="font-medium">
-                      {new Date(h.zeitstempel).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} {h.aktion}
-                    </span>
-                    <span className="text-gray-500"> von {h.von} - {h.details}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
+          <div className="feld-reihe">
+            <div className="feld">
+              <label>Priorität</label>
+              {isReadOnly ? <p className="feld-wert">{anfrage.prioritaet}</p> : (
+                <select value={form.prioritaet} onChange={(e) => set('prioritaet', e.target.value)}>
+                  {PRIORITAETEN.map((p) => <option key={p}>{p}</option>)}
+                </select>
+              )}
+            </div>
+            <div className="feld">
+              <label>Bearbeiter</label>
+              {isReadOnly ? <p className="feld-wert">{anfrage.bearbeiter}</p> : (
+                <select value={form.bearbeiter} onChange={(e) => set('bearbeiter', e.target.value)}>
+                  {BEARBEITER.map((b) => <option key={b}>{b}</option>)}
+                </select>
+              )}
+            </div>
           </div>
+
+          <div className="feld-reihe">
+            <div className="feld">
+              <label>Follow-up Datum</label>
+              {isReadOnly ? <p className="feld-wert">{anfrage.followupDatum || '-'}</p> : (
+                <input type="date" value={form.followupDatum || ''} onChange={(e) => set('followupDatum', e.target.value)} />
+              )}
+            </div>
+            <div className="feld">
+              <label>Uhrzeit</label>
+              {isReadOnly ? <p className="feld-wert">{anfrage.followupZeit || '-'}</p> : (
+                <input type="time" value={form.followupZeit || ''} onChange={(e) => set('followupZeit', e.target.value)} />
+              )}
+            </div>
+          </div>
+
+          <div className="feld">
+            <label>Notizen</label>
+            {isReadOnly ? <p className="feld-wert">{anfrage.notizen || '-'}</p>
+              : <textarea value={form.notizen || ''} onChange={(e) => set('notizen', e.target.value)} rows={3} />}
+          </div>
+
+          <button className="history-toggle" onClick={() => setShowHistory((v) => !v)}>
+            {showHistory ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            Änderungs-History ({(anfrage.history || []).length})
+          </button>
+          {showHistory && (
+            <div className="history-liste">
+              {(anfrage.history || []).slice().reverse().map((h, i) => (
+                <div className="history-eintrag" key={i}>
+                  <span className="history-zeit">{uhrzeit(h.zeitstempel)}</span>
+                  <span className="history-text"><strong>{h.aktion}</strong> · {h.von}{h.details ? ' · ' + h.details : ''}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* Footer */}
         {!isReadOnly && (
-          <div className="px-5 py-3 border-t flex items-center justify-between sticky bottom-0 bg-white">
-            <button onClick={() => onDelete(anfrage)}
-              className="text-red-600 text-sm flex items-center gap-1 hover:underline">
-              <Trash2 size={14} /> Loeschen
+          <div className="modal-fuss">
+            <button className="loeschen-btn" onClick={() => onDelete(anfrage)}>
+              <Trash2 size={14} /> Löschen
             </button>
-            <button onClick={() => onSave({ ...form })}
-              className="bg-physiopro text-white text-sm rounded px-4 py-1.5 flex items-center gap-1">
-              <Edit3 size={14} /> Speichern
-            </button>
+            <button className="speichern-btn" onClick={() => onSave(form)}>Speichern</button>
           </div>
         )}
       </div>
@@ -512,19 +516,10 @@ function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, o
 
 function InfoCard({ icon, label, value }) {
   return (
-    <div className="bg-gray-50 rounded border border-gray-200 px-3 py-2">
-      <div className="flex items-center gap-1 text-xs text-gray-500">{icon}{label}</div>
-      <div className="text-sm text-gray-800 truncate">{value}</div>
+    <div className="info-card">
+      <span className="info-label">{icon}{label}</span>
+      <span className="info-wert">{value}</span>
     </div>
-  );
-}
-
-function Field({ label, children }) {
-  return (
-    <label className="block">
-      <span className="text-xs font-medium text-gray-500">{label}</span>
-      <div className="mt-1">{children}</div>
-    </label>
   );
 }
 
@@ -533,88 +528,75 @@ function Field({ label, children }) {
 // ====================================================================
 function NeueAnfrageForm({ onClose, onSubmit, onMerge, checkDuplicate }) {
   const [form, setForm] = useState({
-    quelle: 'Manuell erfasst',
-    name: '',
-    telefon: '',
-    email: '',
-    anliegen: '',
-    prioritaet: 'Normal',
+    name: '', telefon: '', email: '', anliegen: '',
+    prioritaet: 'Normal', quelle: 'Manuell erfasst',
   });
   const [duplikat, setDuplikat] = useState(null);
-
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-  const valid = form.name.trim().length >= 2 && form.telefon.trim().length >= 3 && form.anliegen.trim().length >= 5;
 
-  const handleSubmit = () => {
-    if (!valid) return;
+  const absenden = () => {
+    if (!form.name.trim()) { alert('Name ist erforderlich'); return; }
     const dup = checkDuplicate(form.name, form.telefon);
-    if (dup) {
-      setDuplikat(dup);
-      return;
-    }
+    if (dup && !duplikat) { setDuplikat(dup); return; }
     onSubmit(form);
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50" onClick={onClose}>
-      <div className="bg-white rounded-lg w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
-        <div className="bg-physiopro text-white px-5 py-3 flex items-center justify-between">
-          <h2 className="font-semibold">Neue Anfrage erfassen</h2>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal modal-schmal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-kopf">
+          <h2>Neuer Eintrag</h2>
           <button onClick={onClose} aria-label="Schliessen"><X size={20} /></button>
         </div>
-
-        <div className="p-5 space-y-3">
-          <Field label="Quelle">
-            <select value={form.quelle} onChange={(e) => set('quelle', e.target.value)}
-              className="w-full border rounded px-2 py-1 text-sm">
-              {QUELLEN.map((q) => <option key={q}>{q}</option>)}
-            </select>
-          </Field>
-          <Field label="Name *">
-            <input value={form.name} onChange={(e) => set('name', e.target.value)}
-              className="w-full border rounded px-2 py-1 text-sm" />
-          </Field>
-          <Field label="Telefon *">
-            <input value={form.telefon} onChange={(e) => set('telefon', e.target.value)}
-              className="w-full border rounded px-2 py-1 text-sm" />
-          </Field>
-          <Field label="Email">
-            <input type="email" value={form.email} onChange={(e) => set('email', e.target.value)}
-              className="w-full border rounded px-2 py-1 text-sm" />
-          </Field>
-          <Field label="Anliegen *">
-            <textarea rows={3} value={form.anliegen} onChange={(e) => set('anliegen', e.target.value)}
-              className="w-full border rounded px-2 py-1 text-sm" />
-          </Field>
-          <Field label="Prioritaet">
-            <select value={form.prioritaet} onChange={(e) => set('prioritaet', e.target.value)}
-              className="w-full border rounded px-2 py-1 text-sm">
-              {PRIORITAETEN.map((p) => <option key={p}>{p}</option>)}
-            </select>
-          </Field>
-
-          {/* Duplikat-Warnung */}
+        <div className="modal-body">
           {duplikat && (
-            <div className="bg-amber-50 border border-amber-300 rounded p-3 text-sm">
-              <p className="flex items-center gap-1 text-amber-800 font-medium">
-                <AlertTriangle size={16} /> Anfrage von {duplikat.name} ({duplikat.telefon}) existiert bereits!
-              </p>
-              <div className="flex gap-2 mt-2">
-                <button onClick={() => onMerge(duplikat, form)}
-                  className="bg-amber-600 text-white rounded px-3 py-1 text-xs">Mergen</button>
-                <button onClick={() => setDuplikat(null)}
-                  className="border rounded px-3 py-1 text-xs">Abbrechen</button>
+            <div className="duplikat-warnung">
+              <AlertTriangle size={16} />
+              <div>
+                <strong>Mögliches Duplikat:</strong> {duplikat.name} ({duplikat.telefon}) existiert bereits.
+                <div className="duplikat-aktionen">
+                  <button onClick={() => onMerge(duplikat, form)}>Zusammenführen</button>
+                  <button onClick={() => onSubmit(form)}>Trotzdem neu anlegen</button>
+                </div>
               </div>
             </div>
           )}
+          <div className="feld">
+            <label>Name *</label>
+            <input type="text" value={form.name} onChange={(e) => set('name', e.target.value)} autoFocus />
+          </div>
+          <div className="feld-reihe">
+            <div className="feld">
+              <label>Telefon</label>
+              <input type="tel" value={form.telefon} onChange={(e) => set('telefon', e.target.value)} />
+            </div>
+            <div className="feld">
+              <label>E-Mail</label>
+              <input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} />
+            </div>
+          </div>
+          <div className="feld">
+            <label>Anliegen</label>
+            <textarea value={form.anliegen} onChange={(e) => set('anliegen', e.target.value)} rows={2} />
+          </div>
+          <div className="feld-reihe">
+            <div className="feld">
+              <label>Priorität</label>
+              <select value={form.prioritaet} onChange={(e) => set('prioritaet', e.target.value)}>
+                {PRIORITAETEN.map((p) => <option key={p}>{p}</option>)}
+              </select>
+            </div>
+            <div className="feld">
+              <label>Quelle</label>
+              <select value={form.quelle} onChange={(e) => set('quelle', e.target.value)}>
+                {QUELLEN.map((q) => <option key={q}>{q}</option>)}
+              </select>
+            </div>
+          </div>
         </div>
-
-        <div className="px-5 py-3 border-t flex justify-end gap-2">
-          <button onClick={onClose} className="border rounded px-4 py-1.5 text-sm">Abbrechen</button>
-          <button onClick={handleSubmit} disabled={!valid}
-            className="bg-physiopro text-white rounded px-4 py-1.5 text-sm disabled:opacity-50">
-            Speichern
-          </button>
+        <div className="modal-fuss">
+          <button className="abbrechen-btn" onClick={onClose}>Abbrechen</button>
+          <button className="speichern-btn" onClick={absenden}>Anlegen</button>
         </div>
       </div>
     </div>
