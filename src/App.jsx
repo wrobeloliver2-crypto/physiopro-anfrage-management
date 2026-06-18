@@ -20,6 +20,16 @@ const BEARBEITER = ['Luca', 'Finn', 'Annika', 'Oliver Wrobel', 'Hanna Wrobel', '
 const QUELLEN = ['Website', 'Telefon-Benachrichtigung', 'Manuell erfasst'];
 const READ_ONLY_USERS = ['Oliver Wrobel', 'Hanna Wrobel'];
 
+// Uhrzeit-Slots 08:00–18:00 in 30-Min-Schritten
+const ZEIT_SLOTS = (() => {
+  const slots = [];
+  for (let h = 8; h <= 18; h++) {
+    slots.push(String(h).padStart(2, '0') + ':00');
+    if (h < 18) slots.push(String(h).padStart(2, '0') + ':30');
+  }
+  return slots;
+})();
+
 const SPALTEN_AKZENT = {
   'Offen': '#55725e',
   'In Bearbeitung': '#8c7660',
@@ -474,7 +484,10 @@ function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, o
             <div className="feld">
               <label>Uhrzeit</label>
               {isReadOnly ? <p className="feld-wert">{anfrage.followupZeit || '-'}</p> : (
-                <input type="time" value={form.followupZeit || ''} onChange={(e) => set('followupZeit', e.target.value)} />
+                <select value={form.followupZeit || ''} onChange={(e) => set('followupZeit', e.target.value)}>
+                  <option value="">– keine –</option>
+                  {ZEIT_SLOTS.map((z) => <option key={z} value={z}>{z}</option>)}
+                </select>
               )}
             </div>
           </div>
