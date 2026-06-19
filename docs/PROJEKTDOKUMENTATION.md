@@ -225,9 +225,11 @@ Cormorant Garamond. Spalten als Boxen mit farbigem Kopf
 - Oliver → `oliver.wrobel@pilatescompany.de`
 - Hanna → `hanna.wrobel@pilatescompany.de`
 
-**Verifiziert (19.06.2026):** Oliver-Weiterleitung → Mail an Oliver;
-Hanna-Weiterleitung → Mail an Hanna (getrennt, korrekt); Doppelversand-Schutz
-aktiv.
+**Verifiziert (19.06.2026):** Zwei Testläufe bestätigt:
+- Lauf 1: 2 Mails korrekt adressiert (Oliver→oliver@, Hanna→hanna@),
+  beide Zeilen auf „weitergeleitet-gesendet" gesetzt.
+- Lauf 2: 0 Mails, alle Zeilen übersprungen (487 ms) → Doppelversand-Schutz
+  greift sauber. Empfänger-Routing über `weitergeleitetAn` (R1-Fix) bestätigt.
 
 ### Flow #2 — Reminder (NOCH OFFEN)
 Geplant: Erinnerung bei fälligem Follow-up + tägliche Zusammenfassung. Noch
