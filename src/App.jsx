@@ -452,7 +452,7 @@ function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, o
   const [form, setForm] = useState({ ...anfrage });
   const [showHistory, setShowHistory] = useState(false);
   const set = (k,v) => setForm((f) => ({ ...f, [k]: v }));
-  const schritte = anfrage.status==='To Do' ? SCHRITTE_HAENGT : SCHRITTE_AKTIV;
+  const schritte = form.status==='To Do' ? SCHRITTE_HAENGT : SCHRITTE_AKTIV;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -478,12 +478,12 @@ function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, o
             {isReadOnly ? <p className="feld-wert">{anfrage.status}</p> : (
               <div className="status-buttons">
                 {SPALTEN.concat('Erledigt').map((s) => (
-                  <button key={s} className={'status-btn'+(anfrage.status===s?' aktiv':'')} onClick={() => onStatusChange(anfrage,s)}>{s}</button>
+                  <button key={s} className={'status-btn'+(form.status===s?' aktiv':'')} onClick={() => set('status', s)}>{s}</button>
                 ))}
               </div>
             )}
           </div>
-          {(anfrage.status==='In Bearbeitung' || anfrage.status==='To Do') && !isReadOnly && (
+          {(form.status==='In Bearbeitung' || form.status==='To Do') && !isReadOnly && (
             <div className="feld">
               <label>Bearbeitungs-Schritt</label>
               <select value={form.schritt || ''} onChange={(e) => { set('schritt', e.target.value); }}>
