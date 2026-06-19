@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Plus, Phone, Mail, Clock, AlertTriangle, ChevronDown, ChevronUp,
   X, Trash2, Calendar, User, Globe, Check, RefreshCw, StickyNote,
-  PhoneCall, Pin,
+  PhoneCall, Pin, ArrowRight, ArrowLeft, Send, Inbox, UserCheck,
+  Search, FileText, PhoneOff, CalendarCheck, Hourglass,
 } from 'lucide-react';
 
 // ====================================================================
@@ -14,49 +15,57 @@ const API_URL = BACKEND_BASE + '/.netlify/functions/sheets-api';
 const NOTES_URL = BACKEND_BASE + '/.netlify/functions/notes-api';
 
 const SPALTEN = ['Offen', 'In Bearbeitung', 'To Do'];
-const ALLE_STATUS = ['Offen', 'In Bearbeitung', 'To Do', 'Erledigt'];
+const ALLE_STATUS = ['Offen', 'In Bearbeitung', 'To Do', 'Erledigt', 'Weitergeleitet'];
 const PRIORITAETEN = ['Sofort', 'Normal', 'Niedrig'];
-const BEARBEITER = ['Luca', 'Finn', 'Annika', 'Oliver Wrobel', 'Hanna Wrobel', 'Unzugewiesen'];
+const BEARBEITER = ['Luca', 'Finn', 'Annika', 'Unzugewiesen'];
 const QUELLEN = ['Website', 'Telefon-Benachrichtigung', 'Manuell erfasst'];
 const READ_ONLY_USERS = ['Oliver Wrobel', 'Hanna Wrobel'];
+const ALLE_USER = ['Luca', 'Finn', 'Annika', 'Oliver Wrobel', 'Hanna Wrobel'];
+
+// Bearbeitungs-Schritte, getrennt nach aktiv (In Bearbeitung) / haengt (To Do)
+const SCHRITTE_AKTIV = ['Rückruf vereinbart', 'Prüfe Terminverfügbarkeit', 'Termin wird abgestimmt'];
+const SCHRITTE_HAENGT = ['Angerufen – niemand erreicht', 'Wartet auf Rezept/Unterlagen', 'Wartet auf Rückmeldung Patient'];
 
 // Uhrzeit-Slots 08:00–18:00 in 30-Min-Schritten
 const ZEIT_SLOTS = (() => {
-  const slots = [];
-  for (let h = 8; h <= 18; h++) {
-    slots.push(String(h).padStart(2, '0') + ':00');
-    if (h < 18) slots.push(String(h).padStart(2, '0') + ':30');
-  }
-  return slots;
+  const s = [];
+  for (let h = 8; h <= 18; h++) { s.push(String(h).padStart(2,'0')+':00'); if (h<18) s.push(String(h).padStart(2,'0')+':30'); }
+  return s;
 })();
 
-const SPALTEN_AKZENT = {
-  'Offen': '#55725e',
-  'In Bearbeitung': '#8c7660',
-  'To Do': '#b8742a',
+const SPALTEN_META = {
+  'Offen':          { farbe: '#55725e', box: '#f4f7f5', rand: '#dde8e0', icon: Inbox },
+  'In Bearbeitung': { farbe: '#8c7660', box: '#faf7f2', rand: '#ece1d2', icon: UserCheck },
+  'To Do':          { farbe: '#b8742a', box: '#fbf5ec', rand: '#f0e2cb', icon: AlertTriangle },
 };
 const PRIO_STYLE = {
-  Sofort: { rand: '#c0392b', text: '#c0392b', bg: '#fbeae8', label: 'Sofort' },
-  Normal: { rand: '#55725e', text: '#3d5445', bg: '#eef3f0', label: 'Normal' },
-  Niedrig: { rand: '#c4b09a', text: '#8c7660', bg: '#f7f0e8', label: 'Niedrig' },
+  Sofort: { rand: '#c0392b', text: '#c0392b', bg: '#fbeae8' },
+  Normal: { rand: '#55725e', text: '#3d5445', bg: '#eef3f0' },
+  Niedrig:{ rand: '#c4b09a', text: '#8c7660', bg: '#f7f0e8' },
 };
 
 // ====================================================================
 // Hilfsfunktionen
 // ====================================================================
-const heute = () => new Date().toISOString().slice(0, 10);
+const heute = () => new Date().toISOString().slice(0,10);
 const jetztISO = () => new Date().toISOString();
 const neueId = () => 'temp-' + Date.now();
-const uhrzeit = (iso) => {
-  try { return new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }); }
-  catch { return ''; }
-};
-function historyEintrag(aktion, von, details) {
-  return { zeitstempel: jetztISO(), aktion, von, details };
+const uhrzeit = (iso) => { try { return new Date(iso).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}); } catch { return ''; } };
+
+function eingangLabel(a) {
+  if (!a.eingangsdatum) return '';
+  const d = a.eingangsdatum;
+  const heuteStr = heute();
+  const gestern = new Date(Date.now()-86400000).toISOString().slice(0,10);
+  if (d === heuteStr) return 'Heute';
+  if (d === gestern) return 'Gestern';
+  const [y,m,t] = d.split('-');
+  return t + '.' + m + '.';
 }
+function historyEintrag(aktion, von, details) { return { zeitstempel: jetztISO(), aktion, von, details }; }
 function followupFaellig(a) {
   if (!a.followupDatum) return false;
-  const ziel = a.followupDatum + (a.followupZeit ? 'T' + a.followupZeit : 'T23:59');
+  const ziel = a.followupDatum + (a.followupZeit ? 'T'+a.followupZeit : 'T23:59');
   return new Date(ziel) < new Date() && a.status !== 'Erledigt';
 }
 const istHeute = (d) => d === heute();
@@ -68,11 +77,10 @@ export default function App() {
   const [anfragen, setAnfragen] = useState([]);
   const [notizen, setNotizen] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState(
-    () => localStorage.getItem('currentUser') || 'Luca'
-  );
+  const [currentUser, setCurrentUser] = useState(() => localStorage.getItem('currentUser') || 'Luca');
   const [showNewForm, setShowNewForm] = useState(false);
   const [selectedAnfrage, setSelectedAnfrage] = useState(null);
+  const [weiterleitenAnfrage, setWeiterleitenAnfrage] = useState(null);
   const [error, setError] = useState(null);
   const [letzteAenderung, setLetzteAenderung] = useState(null);
 
@@ -85,10 +93,10 @@ export default function App() {
     return () => clearInterval(t); /* eslint-disable-next-line */
   }, []);
 
-  const loadFromSheets = useCallback(async (versuch = 0) => {
+  const loadFromSheets = useCallback(async (versuch=0) => {
     setLoading(true); setError(null);
     try {
-      const res = await fetch(API_URL, { method: 'GET' });
+      const res = await fetch(API_URL, { method:'GET' });
       if (res.status === 403) throw new Error('Keine Berechtigung fuer Google Sheet');
       if (res.status === 429) throw new Error('Zu viele Anfragen. Bitte warten...');
       if (!res.ok) throw new Error('Verbindung fehlgeschlagen');
@@ -100,17 +108,16 @@ export default function App() {
         else if (s === 'Angeboten') s = 'In Bearbeitung';
         return { ...a, status: s };
       });
-      setAnfragen(migriert);
-      setLetzteAenderung(new Date());
+      setAnfragen(migriert); setLetzteAenderung(new Date());
     } catch (e) {
-      if (versuch < 2) { setTimeout(() => loadFromSheets(versuch + 1), 3000); return; }
+      if (versuch < 2) { setTimeout(() => loadFromSheets(versuch+1), 3000); return; }
       setError(e.message || 'Verbindung fehlgeschlagen');
     } finally { setLoading(false); }
   }, []);
 
   const loadNotes = useCallback(async () => {
     try {
-      const res = await fetch(NOTES_URL, { method: 'GET' });
+      const res = await fetch(NOTES_URL, { method:'GET' });
       if (!res.ok) return;
       const json = await res.json();
       setNotizen(Array.isArray(json.data) ? json.data : []);
@@ -119,10 +126,7 @@ export default function App() {
 
   const saveToSheets = useCallback(async (data) => {
     try {
-      const res = await fetch(API_URL, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ anfragen: data }),
-      });
+      const res = await fetch(API_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ anfragen: data }) });
       if (!res.ok) throw new Error('Speichern fehlgeschlagen');
       setLetzteAenderung(new Date());
     } catch { setError('Verbindung fehlgeschlagen - Aenderung evtl. nicht gespeichert'); }
@@ -130,138 +134,107 @@ export default function App() {
   const persist = (data) => { setAnfragen(data); saveToSheets(data); };
 
   const saveNotes = useCallback(async (data) => {
-    try {
-      await fetch(NOTES_URL, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ notizen: data }),
-      });
-      setLetzteAenderung(new Date());
-    } catch { setError('Notiz konnte evtl. nicht gespeichert werden'); }
+    try { await fetch(NOTES_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ notizen: data }) }); setLetzteAenderung(new Date()); }
+    catch { setError('Notiz konnte evtl. nicht gespeichert werden'); }
   }, []);
   const persistNotes = (data) => { setNotizen(data); saveNotes(data); };
 
   const checkDuplicate = (name, telefon) =>
-    anfragen.find((a) => a.name.toLowerCase() === name.toLowerCase() &&
-      a.telefon === telefon && a.status !== 'Erledigt');
+    anfragen.find((a) => a.name.toLowerCase() === name.toLowerCase() && a.telefon === telefon && !['Erledigt','Weitergeleitet'].includes(a.status));
 
   const addAnfrage = (data) => {
     const neu = {
-      id: neueId(), eingangsdatum: heute(), quelle: data.quelle,
-      name: data.name, telefon: data.telefon, email: data.email || '',
-      anliegen: data.anliegen, prioritaet: data.prioritaet, status: 'Offen',
-      bearbeiter: 'Unzugewiesen', followupDatum: '', followupZeit: '',
-      notizen: '', history: [historyEintrag('Erstellt', currentUser, 'Manuell erfasst')],
-      reminderStatus: '',
+      id: neueId(), eingangsdatum: heute(), quelle: data.quelle, name: data.name,
+      telefon: data.telefon, email: data.email || '', anliegen: data.anliegen,
+      prioritaet: data.prioritaet, status: 'Offen', bearbeiter: 'Unzugewiesen',
+      schritt: '', followupDatum:'', followupZeit:'', notizen:'',
+      history: [historyEintrag('Erstellt', currentUser, 'Manuell erfasst')], reminderStatus:'', weitergeleitetAn:'',
     };
     persist([...anfragen, neu]); setShowNewForm(false);
   };
-  const mergeAnfrage = (bestehend, data) => {
-    const updated = anfragen.map((a) => a.id === bestehend.id
-      ? { ...a, anliegen: a.anliegen + ' | ' + data.anliegen,
-          history: [...a.history, historyEintrag('Aktualisiert', currentUser, 'Erneute Anfrage zusammengefuehrt')] }
-      : a);
-    persist(updated); setShowNewForm(false);
+  const mergeAnfrage = (best, data) => {
+    persist(anfragen.map((a) => a.id===best.id ? { ...a, anliegen: a.anliegen+' | '+data.anliegen, history:[...a.history, historyEintrag('Aktualisiert', currentUser, 'Erneute Anfrage zusammengefuehrt')] } : a));
+    setShowNewForm(false);
   };
-  const updateAnfrage = (updated, beschreibung = 'Aktualisiert') => {
-    const data = anfragen.map((a) => a.id === updated.id
-      ? { ...updated, history: [...(updated.history || []), historyEintrag('Aktualisiert', currentUser, beschreibung)] }
-      : a);
-    persist(data); setSelectedAnfrage(null);
+  const updateAnfrage = (updated, besch='Aktualisiert') => {
+    persist(anfragen.map((a) => a.id===updated.id ? { ...updated, history:[...(updated.history||[]), historyEintrag('Aktualisiert', currentUser, besch)] } : a));
+    setSelectedAnfrage(null);
   };
-  const changeStatus = (anfrage, neuerStatus) => {
-    const data = anfragen.map((a) => a.id === anfrage.id
-      ? { ...a, status: neuerStatus,
-          history: [...a.history, historyEintrag('Status geaendert', currentUser, anfrage.status + ' -> ' + neuerStatus)] }
-      : a);
-    persist(data);
-    setSelectedAnfrage((prev) => (prev ? { ...prev, status: neuerStatus } : prev));
+
+  // Karten-Aktionen (Workflow-Buttons)
+  const cardMove = (anfrage, neuerStatus) => {
+    persist(anfragen.map((a) => a.id===anfrage.id ? {
+      ...a, status: neuerStatus,
+      bearbeiter: (neuerStatus==='In Bearbeitung' && a.bearbeiter==='Unzugewiesen') ? currentUser : a.bearbeiter,
+      history:[...a.history, historyEintrag('Status', currentUser, a.status+' → '+neuerStatus)]
+    } : a));
+  };
+  const cardSetSchritt = (anfrage, schritt) => {
+    persist(anfragen.map((a) => a.id===anfrage.id ? { ...a, schritt, history:[...a.history, historyEintrag('Schritt', currentUser, schritt)] } : a));
+  };
+  const weiterleiten = (anfrage, an) => {
+    persist(anfragen.map((a) => a.id===anfrage.id ? {
+      ...a, status:'Weitergeleitet', weitergeleitetAn: an, reminderStatus:'',
+      history:[...a.history, historyEintrag('Weitergeleitet', currentUser, 'an '+an)]
+    } : a));
+    setWeiterleitenAnfrage(null); setSelectedAnfrage(null);
   };
   const deleteAnfrage = (anfrage) => {
-    if (!window.confirm('Anfrage von ' + anfrage.name + ' wirklich loeschen?')) return;
-    persist(anfragen.filter((a) => a.id !== anfrage.id)); setSelectedAnfrage(null);
+    if (!window.confirm('Anfrage von '+anfrage.name+' wirklich loeschen?')) return;
+    persist(anfragen.filter((a) => a.id!==anfrage.id)); setSelectedAnfrage(null);
   };
-  const addNotiz = (text) => {
-    if (!text.trim()) return;
-    persistNotes([...notizen, { id: neueId(), text: text.trim(), autor: currentUser, zeit: jetztISO() }]);
-  };
-  const deleteNotiz = (id) => persistNotes(notizen.filter((n) => n.id !== id));
 
-  const offeneCount = anfragen.filter((a) => a.status === 'Offen').length;
-  const sofortCount = anfragen.filter((a) => a.status !== 'Erledigt' && a.prioritaet === 'Sofort').length;
-  const erledigtHeute = useMemo(
-    () => anfragen.filter((a) => a.status === 'Erledigt' && istHeute(a.eingangsdatum)).length,
-    [anfragen]
-  );
+  const addNotiz = (text) => { if (!text.trim()) return; persistNotes([...notizen, { id:neueId(), text:text.trim(), autor:currentUser, zeit:jetztISO() }]); };
+  const deleteNotiz = (id) => persistNotes(notizen.filter((n) => n.id!==id));
+
+  // Sichtbar im Board: alles ausser Erledigt + Weitergeleitet
+  const sichtbar = anfragen.filter((a) => !['Erledigt','Weitergeleitet'].includes(a.status));
+  const offeneCount = sichtbar.filter((a) => a.status==='Offen').length;
+  const sofortCount = sichtbar.filter((a) => a.prioritaet==='Sofort').length;
+  const erledigtHeute = useMemo(() => anfragen.filter((a) => a.status==='Erledigt' && istHeute(a.eingangsdatum)).length, [anfragen]);
+  const weitergeleitetHeute = useMemo(() => anfragen.filter((a) => a.status==='Weitergeleitet' && istHeute(a.eingangsdatum)).length, [anfragen]);
 
   return (
     <div className="app-shell">
       <div className="panel">
-        <Titlebar />
         <Kopfzeile
-          offeneCount={offeneCount} sofortCount={sofortCount} erledigtHeute={erledigtHeute}
+          offeneCount={offeneCount} sofortCount={sofortCount}
+          erledigtHeute={erledigtHeute} weitergeleitetHeute={weitergeleitetHeute}
           letzteAenderung={letzteAenderung} currentUser={currentUser}
           setCurrentUser={setCurrentUser} isReadOnly={isReadOnly}
-          onNeu={() => setShowNewForm(true)}
+          onNeu={() => setShowNewForm(true)} onRefresh={() => { loadFromSheets(); loadNotes(); }}
         />
         {error && (
-          <div className="fehler-leiste">
-            <span>{error}</span>
-            <button onClick={() => loadFromSheets()}>Erneut versuchen</button>
-          </div>
+          <div className="fehler-leiste"><span>{error}</span><button onClick={() => loadFromSheets()}>Erneut versuchen</button></div>
         )}
         <main className="board-bereich">
-          {loading && anfragen.length === 0 ? (
+          {loading && anfragen.length===0 ? (
             <div className="lade-zustand"><div className="spinner" /><span>Daten laden…</span></div>
           ) : (
             <div className="spalten-grid">
               {SPALTEN.map((status) => (
                 <StatusSpalte key={status} status={status}
-                  anfragen={anfragen.filter((a) => a.status === status)}
-                  onCardClick={setSelectedAnfrage} />
+                  anfragen={sichtbar.filter((a) => a.status===status)}
+                  isReadOnly={isReadOnly} onCardClick={setSelectedAnfrage}
+                  onMove={cardMove} onSetSchritt={cardSetSchritt} onWeiterleiten={setWeiterleitenAnfrage} />
               ))}
             </div>
           )}
-          <UebergabeNotizen notizen={notizen} isReadOnly={isReadOnly}
-            onAdd={addNotiz} onDelete={deleteNotiz} />
+          <UebergabeNotizen notizen={notizen} isReadOnly={isReadOnly} onAdd={addNotiz} onDelete={deleteNotiz} />
         </main>
+
         {selectedAnfrage && (
           <AnfragenModal anfrage={selectedAnfrage} isReadOnly={isReadOnly}
             onClose={() => setSelectedAnfrage(null)} onSave={updateAnfrage}
-            onStatusChange={changeStatus} onDelete={deleteAnfrage} />
+            onStatusChange={(a,s) => cardMove(a,s)} onDelete={deleteAnfrage}
+            onWeiterleiten={() => setWeiterleitenAnfrage(selectedAnfrage)} />
+        )}
+        {weiterleitenAnfrage && (
+          <WeiterleitenModal anfrage={weiterleitenAnfrage} onClose={() => setWeiterleitenAnfrage(null)} onConfirm={weiterleiten} />
         )}
         {showNewForm && !isReadOnly && (
-          <NeueAnfrageForm onClose={() => setShowNewForm(false)} onSubmit={addAnfrage}
-            onMerge={mergeAnfrage} checkDuplicate={checkDuplicate} />
+          <NeueAnfrageForm onClose={() => setShowNewForm(false)} onSubmit={addAnfrage} onMerge={mergeAnfrage} checkDuplicate={checkDuplicate} />
         )}
-      </div>
-    </div>
-  );
-}
-
-// ====================================================================
-// Titlebar
-// ====================================================================
-function Titlebar() {
-  const [pinned, setPinned] = useState(true);
-  const togglePin = async () => {
-    const next = !pinned; setPinned(next);
-    try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      await getCurrentWindow().setAlwaysOnTop(next);
-    } catch { /* Browser */ }
-  };
-  return (
-    <div className="titlebar" data-tauri-drag-region>
-      <div className="titlebar-left" data-tauri-drag-region>
-        <span className="ampel" />
-        <span className="titlebar-text">PhysioPro Rezeption</span>
-      </div>
-      <div className="titlebar-right">
-        <button className={'pin-btn' + (pinned ? ' pin-aktiv' : '')} onClick={togglePin}
-          title={pinned ? 'Immer im Vordergrund: AN' : 'Immer im Vordergrund: AUS'}
-          aria-label="Immer im Vordergrund umschalten">
-          <Pin size={14} />
-        </button>
       </div>
     </div>
   );
@@ -270,104 +243,140 @@ function Titlebar() {
 // ====================================================================
 // Kopfzeile
 // ====================================================================
-function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, letzteAenderung,
-  currentUser, setCurrentUser, isReadOnly, onNeu }) {
-  const aenderungsZeit = letzteAenderung
-    ? letzteAenderung.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
-    : '—';
+function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeute, letzteAenderung, currentUser, setCurrentUser, isReadOnly, onNeu, onRefresh }) {
+  const aenderungsZeit = letzteAenderung ? letzteAenderung.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}) : '—';
   return (
     <div className="kopfzeile">
       <div className="kopf-links">
         <div>
           <h1 className="kopf-titel">Rezeptionsdashboard</h1>
-          <div className="kopf-zeitstempel">
+          <button className="kopf-zeitstempel" onClick={onRefresh} title="Jetzt aktualisieren">
             <RefreshCw size={10} /> Letzte Änderung {aenderungsZeit}
-          </div>
+          </button>
         </div>
-        <div className="erledigt-chip">
-          <Check size={13} />
-          <span>{erledigtHeute} heute erledigt</span>
+        <div className="chip-gruppe">
+          <div className="chip chip-gruen"><Check size={13} /><span>{erledigtHeute} erledigt</span></div>
+          {weitergeleitetHeute > 0 && (
+            <div className="chip chip-lila"><Send size={13} /><span>{weitergeleitetHeute} weitergeleitet</span></div>
+          )}
         </div>
       </div>
       <div className="kopf-rechts">
-        <span className="kopf-stats">{offeneCount} offen{sofortCount > 0 ? ' · ' + sofortCount + ' sofort' : ''}</span>
-        <select className="user-select" aria-label="Benutzer auswaehlen"
-          value={currentUser} onChange={(e) => setCurrentUser(e.target.value)}>
-          {BEARBEITER.filter((b) => b !== 'Unzugewiesen').map((b) => (
-            <option key={b} value={b}>{b}</option>
-          ))}
+        <span className="kopf-stats">{offeneCount} offen{sofortCount>0 ? ' · '+sofortCount+' sofort' : ''}</span>
+        <select className="user-select" aria-label="Benutzer" value={currentUser} onChange={(e) => setCurrentUser(e.target.value)}>
+          {ALLE_USER.map((b) => <option key={b} value={b}>{b}</option>)}
         </select>
-        {!isReadOnly && (
-          <button className="neu-btn" onClick={onNeu}>
-            <Plus size={14} /> Eintrag
-          </button>
-        )}
+        {!isReadOnly && <button className="neu-btn" onClick={onNeu}><Plus size={14} /> Neue Anfrage</button>}
       </div>
     </div>
   );
 }
 
 // ====================================================================
-// StatusSpalte
+// StatusSpalte (Box mit farbigem Kopf)
 // ====================================================================
-function StatusSpalte({ status, anfragen, onCardClick }) {
-  const akzent = SPALTEN_AKZENT[status];
-  const istTodo = status === 'To Do';
+function StatusSpalte({ status, anfragen, isReadOnly, onCardClick, onMove, onSetSchritt, onWeiterleiten }) {
+  const meta = SPALTEN_META[status];
+  const Icon = meta.icon;
   return (
-    <section className="spalte">
-      <div className="spalte-kopf">
-        <span className="spalte-titel" style={{ color: akzent }}>{status}</span>
-        <span className="spalte-zaehler" style={{
-          background: istTodo || status === 'Offen' ? akzent : '#f2ede6',
-          color: istTodo || status === 'Offen' ? '#fff' : '#8c7660',
-        }}>{anfragen.length}</span>
+    <section className="spalte-box" style={{ background: meta.box, borderColor: meta.rand }}>
+      <div className="spalte-kopf" style={{ background: meta.farbe }}>
+        <span className="spalte-titel"><Icon size={15} /> {status}</span>
+        <span className="spalte-zaehler" style={{ color: meta.farbe }}>{anfragen.length}</span>
       </div>
       <div className="spalte-karten">
         {anfragen.map((a) => (
-          <AnfragenKarte key={a.id} anfrage={a} istTodo={istTodo} onClick={() => onCardClick(a)} />
+          <AnfragenKarte key={a.id} anfrage={a} spalte={status} isReadOnly={isReadOnly}
+            onClick={() => onCardClick(a)} onMove={onMove} onSetSchritt={onSetSchritt} onWeiterleiten={onWeiterleiten} />
         ))}
-        {anfragen.length === 0 && <p className="spalte-leer">Keine Einträge</p>}
+        {anfragen.length===0 && <p className="spalte-leer">Keine Einträge</p>}
       </div>
     </section>
   );
 }
 
 // ====================================================================
-// AnfragenKarte
+// AnfragenKarte (mit Workflow-Buttons + Schritt-Etikett)
 // ====================================================================
-function AnfragenKarte({ anfrage, istTodo, onClick }) {
+function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchritt, onWeiterleiten }) {
+  const [schrittOffen, setSchrittOffen] = useState(false);
   const prio = PRIO_STYLE[anfrage.prioritaet] || PRIO_STYLE.Normal;
+  const istTodo = spalte==='To Do';
+  const istBearb = spalte==='In Bearbeitung';
   const faellig = followupFaellig(anfrage);
-  const quelleIcon = anfrage.quelle === 'Telefon-Benachrichtigung'
-    ? <Phone size={11} /> : <Globe size={11} />;
+  const stop = (e, fn) => { e.stopPropagation(); fn(); };
+  const schritte = istTodo ? SCHRITTE_HAENGT : SCHRITTE_AKTIV;
+
   return (
-    <button className={'karte' + (istTodo ? ' karte-todo' : '')} onClick={onClick}
+    <div className={'karte'+(istTodo?' karte-todo':'')} onClick={onClick}
       style={{ borderLeftColor: istTodo ? '#d99a3a' : prio.rand }}>
       <div className="karte-kopf">
         <span className="karte-name">{anfrage.name}</span>
-        {istTodo ? (
-          <AlertTriangle size={12} color="#b8742a" />
-        ) : (
-          <span className="karte-prio" style={{ color: prio.text, background: prio.bg }}>
-            {prio.label}
-          </span>
-        )}
+        {istTodo ? <AlertTriangle size={12} color="#b8742a" />
+          : <span className="karte-prio" style={{ color:prio.text, background:prio.bg }}>{anfrage.prioritaet}</span>}
       </div>
       <p className="karte-anliegen">{anfrage.anliegen}</p>
-      <div className="karte-meta">
-        {anfrage.bearbeiter && anfrage.bearbeiter !== 'Unzugewiesen' ? (
-          <span className="karte-meta-item"><User size={11} />{anfrage.bearbeiter}</span>
-        ) : (
-          <span className="karte-meta-item">{quelleIcon}{anfrage.quelle === 'Telefon-Benachrichtigung' ? 'Telefon' : anfrage.quelle === 'Website' ? 'Webformular' : 'Manuell'}</span>
-        )}
-      </div>
-      {anfrage.followupDatum && (
-        <div className={'karte-followup' + (faellig ? ' faellig' : '')}>
-          <Clock size={11} />
-          {faellig ? 'Fällig: ' : 'Termin: '}{anfrage.followupDatum} {anfrage.followupZeit}
+
+      {(istBearb || istTodo) && (
+        <div className="karte-schritt-zeile" onClick={(e) => e.stopPropagation()}>
+          {anfrage.schritt ? (
+            <span className={'schritt-etikett'+(istTodo?' etikett-todo':'')}>{anfrage.schritt}</span>
+          ) : (
+            <span className="schritt-leer">Kein Schritt gewählt</span>
+          )}
+          {!isReadOnly && (
+            <button className="schritt-aendern" onClick={() => setSchrittOffen((v) => !v)}>▾ ändern</button>
+          )}
+          {schrittOffen && !isReadOnly && (
+            <div className="schritt-menue">
+              {schritte.map((s) => (
+                <button key={s} onClick={() => { onSetSchritt(anfrage, s); setSchrittOffen(false); }}>{s}</button>
+              ))}
+              {anfrage.schritt && <button className="schritt-loeschen" onClick={() => { onSetSchritt(anfrage,''); setSchrittOffen(false); }}>Etikett entfernen</button>}
+            </div>
+          )}
         </div>
       )}
-    </button>
+
+      <div className="karte-meta">
+        {anfrage.telefon && <span className="karte-tel"><Phone size={12} /> {anfrage.telefon}</span>}
+        <span className="karte-zeit"><Clock size={12} /> {eingangLabel(anfrage)} {anfrage.eingangsdatum===heute() || eingangLabel(anfrage)==='Gestern' ? '' : ''}</span>
+        {anfrage.bearbeiter && anfrage.bearbeiter!=='Unzugewiesen' && <span className="karte-bearb"><User size={12} /> {anfrage.bearbeiter}</span>}
+      </div>
+
+      {anfrage.notizen && (
+        <div className={'karte-notiz'+(istTodo?' notiz-todo':'')}><StickyNote size={11} /> {anfrage.notizen}</div>
+      )}
+      {anfrage.followupDatum && (
+        <div className={'karte-followup'+(faellig?' faellig':'')}>
+          <Calendar size={11} /> Follow-up {anfrage.followupDatum} {anfrage.followupZeit}
+        </div>
+      )}
+
+      {!isReadOnly && (
+        <div className="karte-aktionen" onClick={(e) => e.stopPropagation()}>
+          {spalte==='Offen' && (
+            <>
+              <button className="akt-haupt" onClick={(e) => stop(e, () => onMove(anfrage,'In Bearbeitung'))}>Übernehmen <ArrowRight size={12} /></button>
+              <button className="akt-lila" title="An Oliver/Hanna weiterleiten" onClick={(e) => stop(e, () => onWeiterleiten(anfrage))}><Send size={12} /></button>
+            </>
+          )}
+          {spalte==='In Bearbeitung' && (
+            <>
+              <button className="akt-grau" title="Zurück zu Offen" onClick={(e) => stop(e, () => onMove(anfrage,'Offen'))}><ArrowLeft size={12} /></button>
+              <button className="akt-todo" onClick={(e) => stop(e, () => onMove(anfrage,'To Do'))}>To Do <ArrowRight size={12} /></button>
+              <button className="akt-fertig" title="Erledigt" onClick={(e) => stop(e, () => onMove(anfrage,'Erledigt'))}><Check size={12} /></button>
+            </>
+          )}
+          {spalte==='To Do' && (
+            <>
+              <button className="akt-grau" title="Zurück zu In Bearbeitung" onClick={(e) => stop(e, () => onMove(anfrage,'In Bearbeitung'))}><ArrowLeft size={12} /></button>
+              <button className="akt-fertig akt-breit" onClick={(e) => stop(e, () => onMove(anfrage,'Erledigt'))}><Check size={12} /> Erledigt</button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -376,38 +385,62 @@ function AnfragenKarte({ anfrage, istTodo, onClick }) {
 // ====================================================================
 function UebergabeNotizen({ notizen, isReadOnly, onAdd, onDelete }) {
   const [text, setText] = useState('');
+  const [offen, setOffen] = useState(true);
   const absenden = () => { if (text.trim()) { onAdd(text); setText(''); } };
   return (
     <div className="notizen-box">
-      <div className="notizen-kopf">
+      <button className="notizen-kopf" onClick={() => setOffen((v) => !v)}>
         <span className="notizen-titel"><StickyNote size={15} /> Übergabe-Notizen</span>
-        <span className="notizen-sub">für die nächste Schicht</span>
-      </div>
-      <div className="notizen-liste">
-        {notizen.length === 0 && <p className="notizen-leer">Noch keine Notizen für die Übergabe.</p>}
-        {notizen.map((n) => (
-          <div className="notiz" key={n.id}>
-            <span className="notiz-punkt" />
-            <div className="notiz-inhalt">
-              <div className="notiz-text">{n.text}</div>
-              <div className="notiz-meta">{uhrzeit(n.zeit)} · {n.autor}</div>
-            </div>
-            {!isReadOnly && (
-              <button className="notiz-loeschen" onClick={() => onDelete(n.id)} aria-label="Notiz loeschen">
-                <X size={13} />
-              </button>
-            )}
+        <span className="notizen-sub">für die nächste Schicht {offen ? '▾' : '▸'}</span>
+      </button>
+      {offen && (
+        <>
+          <div className="notizen-liste">
+            {notizen.length===0 && <p className="notizen-leer">Noch keine Notizen für die Übergabe.</p>}
+            {notizen.map((n) => (
+              <div className="notiz" key={n.id}>
+                <span className="notiz-punkt" />
+                <div className="notiz-inhalt">
+                  <div className="notiz-text">{n.text}</div>
+                  <div className="notiz-meta">{uhrzeit(n.zeit)} · {n.autor}</div>
+                </div>
+                {!isReadOnly && <button className="notiz-loeschen" onClick={() => onDelete(n.id)} aria-label="Notiz loeschen"><X size={13} /></button>}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      {!isReadOnly && (
-        <div className="notiz-neu">
-          <input type="text" value={text} placeholder="Notiz für die nächste Schicht hinzufügen …"
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') absenden(); }} />
-          <button onClick={absenden} disabled={!text.trim()}><Plus size={14} /></button>
-        </div>
+          {!isReadOnly && (
+            <div className="notiz-neu">
+              <input type="text" value={text} placeholder="Notiz für die nächste Schicht hinzufügen …"
+                onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key==='Enter') absenden(); }} />
+              <button onClick={absenden} disabled={!text.trim()}><Plus size={14} /></button>
+            </div>
+          )}
+        </>
       )}
+    </div>
+  );
+}
+
+// ====================================================================
+// WeiterleitenModal
+// ====================================================================
+function WeiterleitenModal({ anfrage, onClose, onConfirm }) {
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal modal-schmal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-kopf modal-kopf-lila">
+          <h2>Anfrage weiterleiten</h2>
+          <button onClick={onClose} aria-label="Schliessen"><X size={20} /></button>
+        </div>
+        <div className="modal-body">
+          <p className="wl-text">Anfrage von <strong>{anfrage.name}</strong> per E-Mail weiterleiten an:</p>
+          <div className="wl-buttons">
+            <button onClick={() => onConfirm(anfrage,'Oliver Wrobel')}><User size={16} /> Oliver Wrobel</button>
+            <button onClick={() => onConfirm(anfrage,'Hanna Wrobel')}><User size={16} /> Hanna Wrobel</button>
+          </div>
+          <p className="wl-hinweis">Die Anfrage verschwindet danach aus dem Board und wird automatisch per E-Mail zugestellt.</p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -415,10 +448,11 @@ function UebergabeNotizen({ notizen, isReadOnly, onAdd, onDelete }) {
 // ====================================================================
 // AnfragenModal (Detail / Edit)
 // ====================================================================
-function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, onDelete }) {
+function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, onDelete, onWeiterleiten }) {
   const [form, setForm] = useState({ ...anfrage });
   const [showHistory, setShowHistory] = useState(false);
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const set = (k,v) => setForm((f) => ({ ...f, [k]: v }));
+  const schritte = anfrage.status==='To Do' ? SCHRITTE_HAENGT : SCHRITTE_AKTIV;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -434,52 +468,47 @@ function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, o
             <InfoCard icon={<Mail size={14} />} label="E-Mail" value={anfrage.email || '-'} />
             <InfoCard icon={<Globe size={14} />} label="Quelle" value={anfrage.quelle} />
           </div>
-
           <div className="feld">
             <label>Anliegen</label>
             {isReadOnly ? <p className="feld-wert">{anfrage.anliegen}</p>
               : <textarea value={form.anliegen} onChange={(e) => set('anliegen', e.target.value)} rows={2} />}
           </div>
-
-          <div className="feld-reihe">
-            <div className="feld">
-              <label>Status</label>
-              {isReadOnly ? <p className="feld-wert">{anfrage.status}</p> : (
-                <div className="status-buttons">
-                  {ALLE_STATUS.map((s) => (
-                    <button key={s} className={'status-btn' + (anfrage.status === s ? ' aktiv' : '')}
-                      onClick={() => onStatusChange(anfrage, s)}>{s}</button>
-                  ))}
-                </div>
-              )}
-            </div>
+          <div className="feld">
+            <label>Status</label>
+            {isReadOnly ? <p className="feld-wert">{anfrage.status}</p> : (
+              <div className="status-buttons">
+                {SPALTEN.concat('Erledigt').map((s) => (
+                  <button key={s} className={'status-btn'+(anfrage.status===s?' aktiv':'')} onClick={() => onStatusChange(anfrage,s)}>{s}</button>
+                ))}
+              </div>
+            )}
           </div>
-
+          {(anfrage.status==='In Bearbeitung' || anfrage.status==='To Do') && !isReadOnly && (
+            <div className="feld">
+              <label>Bearbeitungs-Schritt</label>
+              <select value={form.schritt || ''} onChange={(e) => { set('schritt', e.target.value); }}>
+                <option value="">– kein Schritt –</option>
+                {schritte.map((s) => <option key={s}>{s}</option>)}
+              </select>
+            </div>
+          )}
           <div className="feld-reihe">
             <div className="feld">
               <label>Priorität</label>
-              {isReadOnly ? <p className="feld-wert">{anfrage.prioritaet}</p> : (
-                <select value={form.prioritaet} onChange={(e) => set('prioritaet', e.target.value)}>
-                  {PRIORITAETEN.map((p) => <option key={p}>{p}</option>)}
-                </select>
-              )}
+              {isReadOnly ? <p className="feld-wert">{anfrage.prioritaet}</p>
+                : <select value={form.prioritaet} onChange={(e) => set('prioritaet', e.target.value)}>{PRIORITAETEN.map((p) => <option key={p}>{p}</option>)}</select>}
             </div>
             <div className="feld">
               <label>Bearbeiter</label>
-              {isReadOnly ? <p className="feld-wert">{anfrage.bearbeiter}</p> : (
-                <select value={form.bearbeiter} onChange={(e) => set('bearbeiter', e.target.value)}>
-                  {BEARBEITER.map((b) => <option key={b}>{b}</option>)}
-                </select>
-              )}
+              {isReadOnly ? <p className="feld-wert">{anfrage.bearbeiter}</p>
+                : <select value={form.bearbeiter} onChange={(e) => set('bearbeiter', e.target.value)}>{BEARBEITER.map((b) => <option key={b}>{b}</option>)}</select>}
             </div>
           </div>
-
           <div className="feld-reihe">
             <div className="feld">
               <label>Follow-up Datum</label>
-              {isReadOnly ? <p className="feld-wert">{anfrage.followupDatum || '-'}</p> : (
-                <input type="date" value={form.followupDatum || ''} onChange={(e) => set('followupDatum', e.target.value)} />
-              )}
+              {isReadOnly ? <p className="feld-wert">{anfrage.followupDatum || '-'}</p>
+                : <input type="date" value={form.followupDatum || ''} onChange={(e) => set('followupDatum', e.target.value)} />}
             </div>
             <div className="feld">
               <label>Uhrzeit</label>
@@ -491,35 +520,32 @@ function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, o
               )}
             </div>
           </div>
-
           <div className="feld">
             <label>Notizen</label>
             {isReadOnly ? <p className="feld-wert">{anfrage.notizen || '-'}</p>
               : <textarea value={form.notizen || ''} onChange={(e) => set('notizen', e.target.value)} rows={3} />}
           </div>
-
           <button className="history-toggle" onClick={() => setShowHistory((v) => !v)}>
-            {showHistory ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            Änderungs-History ({(anfrage.history || []).length})
+            {showHistory ? <ChevronUp size={14} /> : <ChevronDown size={14} />} Änderungs-History ({(anfrage.history||[]).length})
           </button>
           {showHistory && (
             <div className="history-liste">
-              {(anfrage.history || []).slice().reverse().map((h, i) => (
+              {(anfrage.history||[]).slice().reverse().map((h,i) => (
                 <div className="history-eintrag" key={i}>
                   <span className="history-zeit">{uhrzeit(h.zeitstempel)}</span>
-                  <span className="history-text"><strong>{h.aktion}</strong> · {h.von}{h.details ? ' · ' + h.details : ''}</span>
+                  <span className="history-text"><strong>{h.aktion}</strong> · {h.von}{h.details ? ' · '+h.details : ''}</span>
                 </div>
               ))}
             </div>
           )}
         </div>
-
         {!isReadOnly && (
           <div className="modal-fuss">
-            <button className="loeschen-btn" onClick={() => onDelete(anfrage)}>
-              <Trash2 size={14} /> Löschen
-            </button>
-            <button className="speichern-btn" onClick={() => onSave(form)}>Speichern</button>
+            <button className="loeschen-btn" onClick={() => onDelete(anfrage)}><Trash2 size={14} /> Löschen</button>
+            <div className="fuss-rechts">
+              <button className="wl-btn" onClick={onWeiterleiten}><Send size={14} /> Weiterleiten</button>
+              <button className="speichern-btn" onClick={() => onSave(form)}>Speichern</button>
+            </div>
           </div>
         )}
       </div>
@@ -540,33 +566,27 @@ function InfoCard({ icon, label, value }) {
 // NeueAnfrageForm
 // ====================================================================
 function NeueAnfrageForm({ onClose, onSubmit, onMerge, checkDuplicate }) {
-  const [form, setForm] = useState({
-    name: '', telefon: '', email: '', anliegen: '',
-    prioritaet: 'Normal', quelle: 'Manuell erfasst',
-  });
+  const [form, setForm] = useState({ name:'', telefon:'', email:'', anliegen:'', prioritaet:'Normal', quelle:'Manuell erfasst' });
   const [duplikat, setDuplikat] = useState(null);
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-
+  const set = (k,v) => setForm((f) => ({ ...f, [k]: v }));
   const absenden = () => {
     if (!form.name.trim()) { alert('Name ist erforderlich'); return; }
     const dup = checkDuplicate(form.name, form.telefon);
     if (dup && !duplikat) { setDuplikat(dup); return; }
     onSubmit(form);
   };
-
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal modal-schmal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-kopf">
-          <h2>Neuer Eintrag</h2>
+          <h2>Neue Anfrage</h2>
           <button onClick={onClose} aria-label="Schliessen"><X size={20} /></button>
         </div>
         <div className="modal-body">
           {duplikat && (
             <div className="duplikat-warnung">
               <AlertTriangle size={16} />
-              <div>
-                <strong>Mögliches Duplikat:</strong> {duplikat.name} ({duplikat.telefon}) existiert bereits.
+              <div><strong>Mögliches Duplikat:</strong> {duplikat.name} ({duplikat.telefon}) existiert bereits.
                 <div className="duplikat-aktionen">
                   <button onClick={() => onMerge(duplikat, form)}>Zusammenführen</button>
                   <button onClick={() => onSubmit(form)}>Trotzdem neu anlegen</button>
@@ -574,37 +594,15 @@ function NeueAnfrageForm({ onClose, onSubmit, onMerge, checkDuplicate }) {
               </div>
             </div>
           )}
-          <div className="feld">
-            <label>Name *</label>
-            <input type="text" value={form.name} onChange={(e) => set('name', e.target.value)} autoFocus />
-          </div>
+          <div className="feld"><label>Name *</label><input type="text" value={form.name} onChange={(e) => set('name', e.target.value)} autoFocus /></div>
           <div className="feld-reihe">
-            <div className="feld">
-              <label>Telefon</label>
-              <input type="tel" value={form.telefon} onChange={(e) => set('telefon', e.target.value)} />
-            </div>
-            <div className="feld">
-              <label>E-Mail</label>
-              <input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} />
-            </div>
+            <div className="feld"><label>Telefon</label><input type="tel" value={form.telefon} onChange={(e) => set('telefon', e.target.value)} /></div>
+            <div className="feld"><label>E-Mail</label><input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} /></div>
           </div>
-          <div className="feld">
-            <label>Anliegen</label>
-            <textarea value={form.anliegen} onChange={(e) => set('anliegen', e.target.value)} rows={2} />
-          </div>
+          <div className="feld"><label>Anliegen</label><textarea value={form.anliegen} onChange={(e) => set('anliegen', e.target.value)} rows={2} /></div>
           <div className="feld-reihe">
-            <div className="feld">
-              <label>Priorität</label>
-              <select value={form.prioritaet} onChange={(e) => set('prioritaet', e.target.value)}>
-                {PRIORITAETEN.map((p) => <option key={p}>{p}</option>)}
-              </select>
-            </div>
-            <div className="feld">
-              <label>Quelle</label>
-              <select value={form.quelle} onChange={(e) => set('quelle', e.target.value)}>
-                {QUELLEN.map((q) => <option key={q}>{q}</option>)}
-              </select>
-            </div>
+            <div className="feld"><label>Priorität</label><select value={form.prioritaet} onChange={(e) => set('prioritaet', e.target.value)}>{PRIORITAETEN.map((p) => <option key={p}>{p}</option>)}</select></div>
+            <div className="feld"><label>Quelle</label><select value={form.quelle} onChange={(e) => set('quelle', e.target.value)}>{QUELLEN.map((q) => <option key={q}>{q}</option>)}</select></div>
           </div>
         </div>
         <div className="modal-fuss">
