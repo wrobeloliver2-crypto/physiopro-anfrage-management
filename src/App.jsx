@@ -24,7 +24,7 @@ const ALLE_USER = ['Luca', 'Finn', 'Annika', 'Oliver Wrobel', 'Hanna Wrobel'];
 
 // Bearbeitungs-Schritte, getrennt nach aktiv (In Bearbeitung) / haengt (To Do)
 const SCHRITTE_AKTIV = ['Rückruf vereinbart', 'Prüfe Terminverfügbarkeit', 'Termin wird abgestimmt'];
-const SCHRITTE_HAENGT = ['Angerufen – niemand erreicht', 'Wartet auf Rezept/Unterlagen', 'Wartet auf Rückmeldung Patient'];
+const SCHRITTE_HAENGT = ['Angerufen – niemand erreicht', 'Wartet auf Rezept/Unterlagen', 'Wartet auf Rückmeldung Patient', 'In Medifox storniert', 'Ausfallrechnung schreiben'];
 
 // Uhrzeit-Slots 08:00–18:00 in 30-Min-Schritten
 const ZEIT_SLOTS = (() => {
