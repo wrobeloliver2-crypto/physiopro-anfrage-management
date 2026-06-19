@@ -181,3 +181,25 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 @media (max-width:900px) {
   .spalten-grid { grid-template-columns:1fr; }
 }
+
+/* ---- Ansicht-Tabs (Aktiv / Muelleimer) ---- */
+.ansicht-tabs { display:flex; gap:6px; margin-bottom:16px; }
+.ansicht-tab { display:flex; align-items:center; gap:6px; font-family:var(--sans); font-size:13px; font-weight:500; color:var(--grau); background:#fff; border:1px solid var(--beige-mid); border-radius:100px; padding:7px 15px; cursor:pointer; transition:.15s; }
+.ansicht-tab:hover { color:var(--gruen-dunkel); border-color:var(--beige); }
+.ansicht-tab.aktiv { background:var(--gruen); color:#fff; border-color:var(--gruen); }
+
+/* ---- Muelleimer ---- */
+.muelleimer-leer { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:70px 0; color:var(--grau-hell); gap:10px; text-align:center; }
+.muelleimer-leer p { font-size:14px; color:var(--grau); margin:0; }
+.muelleimer-leer span { font-size:11px; color:var(--grau-hell); max-width:340px; }
+.muelleimer-hinweis { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--grau); margin-bottom:12px; }
+.muelleimer-liste { display:flex; flex-direction:column; gap:8px; }
+.muell-karte { display:flex; align-items:center; justify-content:space-between; gap:12px; background:#fff; border:1px solid var(--beige-mid); border-left:3px solid var(--grau-hell); border-radius:8px; padding:10px 13px; cursor:pointer; transition:.15s; }
+.muell-karte:hover { border-color:var(--beige); box-shadow:0 3px 10px rgba(196,176,154,.18); }
+.muell-haupt { display:flex; flex-direction:column; gap:3px; min-width:0; }
+.muell-name { font-size:13px; font-weight:500; color:var(--text); }
+.muell-anliegen { font-size:11px; color:var(--grau); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:380px; }
+.muell-meta { display:flex; align-items:center; gap:4px; font-size:10px; color:var(--grau-hell); }
+.muell-rest { color:var(--bernstein); }
+.muell-zurueck { display:flex; align-items:center; gap:5px; flex-shrink:0; font-family:var(--sans); font-size:12px; font-weight:500; color:var(--gruen-dunkel); background:var(--gruen-hell); border:none; border-radius:100px; padding:7px 13px; cursor:pointer; transition:.15s; }
+.muell-zurueck:hover { background:var(--gruen); color:#fff; }

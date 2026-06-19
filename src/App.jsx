@@ -3,7 +3,7 @@ import {
   Plus, Phone, Mail, Clock, AlertTriangle, ChevronDown, ChevronUp,
   X, Trash2, Calendar, User, Globe, Check, RefreshCw, StickyNote,
   PhoneCall, Pin, ArrowRight, ArrowLeft, Send, Inbox, UserCheck,
-  Search, FileText, PhoneOff, CalendarCheck, Hourglass,
+  Search, FileText, PhoneOff, CalendarCheck, Hourglass, RotateCcw,
 } from 'lucide-react';
 
 // ====================================================================
@@ -63,6 +63,28 @@ function eingangLabel(a) {
   return t + '.' + m + '.';
 }
 function historyEintrag(aktion, von, details) { return { zeitstempel: jetztISO(), aktion, von, details }; }
+// Eingangs-Uhrzeit: aus dem "Erstellt"-History-Eintrag ableiten (voller Zeitstempel).
+// Faellt sauber leer aus, wenn keine History/kein Zeitstempel vorhanden ist (Altdaten).
+function eingangsZeit(a) {
+  const h = (a.history || []).find((e) => e && e.aktion === 'Erstellt' && e.zeitstempel);
+  if (!h) return '';
+  const u = uhrzeit(h.zeitstempel);
+  return u && u !== 'Invalid Date' ? u : '';
+}
+// Zeitpunkt der Erledigung: letzter History-Eintrag, der den Status auf "Erledigt" gesetzt hat.
+function erledigtAm(a) {
+  const treffer = (a.history || []).filter((e) => e && e.aktion === 'Status' && typeof e.details === 'string' && e.details.includes('Erledigt') && e.zeitstempel);
+  if (!treffer.length) return null;
+  const ts = treffer[treffer.length - 1].zeitstempel;
+  const d = new Date(ts);
+  return isNaN(d.getTime()) ? null : d;
+}
+// Tage seit Erledigung (oder null, wenn kein Erledigt-Zeitstempel bekannt).
+function tageSeitErledigt(a) {
+  const d = erledigtAm(a);
+  if (!d) return null;
+  return Math.floor((Date.now() - d.getTime()) / 86400000);
+}
 function followupFaellig(a) {
   if (!a.followupDatum) return false;
   const ziel = a.followupDatum + (a.followupZeit ? 'T'+a.followupZeit : 'T23:59');
@@ -103,6 +125,7 @@ export default function App() {
   const [weiterleitenAnfrage, setWeiterleitenAnfrage] = useState(null);
   const [error, setError] = useState(null);
   const [letzteAenderung, setLetzteAenderung] = useState(null);
+  const [ansicht, setAnsicht] = useState('aktiv'); // 'aktiv' | 'muelleimer'
 
   const isReadOnly = READ_ONLY_USERS.includes(currentUser);
 
@@ -128,7 +151,15 @@ export default function App() {
         else if (s === 'Angeboten') s = 'In Bearbeitung';
         return { ...a, status: s, telefon: normalizeTelefon(a.telefon) };
       });
-      setAnfragen(migriert); setLetzteAenderung(new Date());
+      // Mülleimer-Aufräumung: Erledigte, deren Erledigt-Zeitpunkt > 14 Tage her ist,
+      // werden aus der Liste entfernt → fallen beim nächsten Speichern aus dem Sheet.
+      // Erledigte ohne erkennbaren Erledigt-Zeitstempel (Altdaten) bleiben erhalten.
+      const bereinigt = migriert.filter((a) => {
+        if (a.status !== 'Erledigt') return true;
+        const t = tageSeitErledigt(a);
+        return t === null || t < 14;
+      });
+      setAnfragen(bereinigt); setLetzteAenderung(new Date());
     } catch (e) {
       if (versuch < 2) { setTimeout(() => loadFromSheets(versuch+1), 3000); return; }
       setError(e.message || 'Verbindung fehlgeschlagen');
@@ -210,6 +241,20 @@ export default function App() {
 
   // Sichtbar im Board: alles ausser Erledigt + Weitergeleitet
   const sichtbar = anfragen.filter((a) => !['Erledigt','Weitergeleitet'].includes(a.status));
+  // Mülleimer: erledigte Anfragen der letzten 14 Tage (jüngste zuerst)
+  const muelleimer = anfragen
+    .filter((a) => a.status === 'Erledigt' && (tageSeitErledigt(a) === null || tageSeitErledigt(a) < 14))
+    .sort((x, y) => {
+      const dx = erledigtAm(x), dy = erledigtAm(y);
+      return (dy ? dy.getTime() : 0) - (dx ? dx.getTime() : 0);
+    });
+  // Aus dem Mülleimer zurückholen → zurück auf "Offen"
+  const zurueckholen = (anfrage) => {
+    persist(anfragen.map((a) => a.id===anfrage.id ? {
+      ...a, status:'Offen',
+      history:[...(a.history||[]), historyEintrag('Status', currentUser, 'Erledigt → Offen (aus Mülleimer)')]
+    } : a));
+  };
   const offeneCount = sichtbar.filter((a) => a.status==='Offen').length;
   const sofortCount = sichtbar.filter((a) => a.prioritaet==='Sofort').length;
   const erledigtHeute = useMemo(() => anfragen.filter((a) => a.status==='Erledigt' && istHeute(a.eingangsdatum)).length, [anfragen]);
@@ -229,9 +274,17 @@ export default function App() {
           <div className="fehler-leiste"><span>{error}</span><button onClick={() => loadFromSheets()}>Erneut versuchen</button></div>
         )}
         <main className="board-bereich">
+          <div className="ansicht-tabs">
+            <button className={'ansicht-tab'+(ansicht==='aktiv'?' aktiv':'')} onClick={() => setAnsicht('aktiv')}>
+              <Inbox size={14} /> Aktiv
+            </button>
+            <button className={'ansicht-tab'+(ansicht==='muelleimer'?' aktiv':'')} onClick={() => setAnsicht('muelleimer')}>
+              <Trash2 size={14} /> Mülleimer{muelleimer.length ? ' ('+muelleimer.length+')' : ''}
+            </button>
+          </div>
           {loading && anfragen.length===0 ? (
             <div className="lade-zustand"><div className="spinner" /><span>Daten laden…</span></div>
-          ) : (
+          ) : ansicht==='aktiv' ? (
             <div className="spalten-grid">
               {SPALTEN.map((status) => (
                 <StatusSpalte key={status} status={status}
@@ -240,6 +293,9 @@ export default function App() {
                   onMove={cardMove} onSetSchritt={cardSetSchritt} onWeiterleiten={setWeiterleitenAnfrage} />
               ))}
             </div>
+          ) : (
+            <Muelleimer anfragen={muelleimer} isReadOnly={isReadOnly}
+              onCardClick={setSelectedAnfrage} onZurueckholen={zurueckholen} />
           )}
           <UebergabeNotizen notizen={notizen} isReadOnly={isReadOnly} onAdd={addNotiz} onDelete={deleteNotiz} />
         </main>
@@ -361,7 +417,7 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
 
       <div className="karte-meta">
         {anfrage.telefon && <span className="karte-tel"><Phone size={12} /> {anfrage.telefon}</span>}
-        <span className="karte-zeit"><Clock size={12} /> {eingangLabel(anfrage)} {anfrage.eingangsdatum===heute() || eingangLabel(anfrage)==='Gestern' ? '' : ''}</span>
+        <span className="karte-zeit"><Clock size={12} /> {eingangLabel(anfrage)}{eingangsZeit(anfrage) ? ' · ' + eingangsZeit(anfrage) : ''}</span>
         {anfrage.bearbeiter && anfrage.bearbeiter!=='Unzugewiesen' && <span className="karte-bearb"><User size={12} /> {anfrage.bearbeiter}</span>}
       </div>
 
@@ -397,6 +453,53 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ====================================================================
+// Muelleimer
+// ====================================================================
+function Muelleimer({ anfragen, isReadOnly, onCardClick, onZurueckholen }) {
+  if (!anfragen.length) {
+    return (
+      <div className="muelleimer-leer">
+        <Trash2 size={28} />
+        <p>Keine erledigten Anfragen.</p>
+        <span>Erledigte Anfragen erscheinen hier 14 Tage lang und können zurückgeholt werden.</span>
+      </div>
+    );
+  }
+  return (
+    <div className="muelleimer">
+      <div className="muelleimer-hinweis">
+        <Trash2 size={13} /> Erledigt der letzten 14 Tage — danach automatisch entfernt.
+      </div>
+      <div className="muelleimer-liste">
+        {anfragen.map((a) => {
+          const tage = tageSeitErledigt(a);
+          const d = erledigtAm(a);
+          const wann = d ? d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit'}) + ' · ' + uhrzeit(d.toISOString()) : '—';
+          const verbleibend = tage === null ? null : Math.max(0, 14 - tage);
+          return (
+            <div className="muell-karte" key={a.id} onClick={() => onCardClick(a)}>
+              <div className="muell-haupt">
+                <span className="muell-name">{a.name || '(ohne Name)'}</span>
+                <span className="muell-anliegen">{a.anliegen}</span>
+                <span className="muell-meta">
+                  <Check size={11} /> erledigt {wann}
+                  {verbleibend !== null && <span className="muell-rest"> · noch {verbleibend} Tag{verbleibend===1?'':'e'}</span>}
+                </span>
+              </div>
+              {!isReadOnly && (
+                <button className="muell-zurueck" title="Zurückholen" onClick={(e) => { e.stopPropagation(); onZurueckholen(a); }}>
+                  <RotateCcw size={13} /> Zurückholen
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
