@@ -70,6 +70,26 @@ function followupFaellig(a) {
 }
 const istHeute = (d) => d === heute();
 
+// Telefonnummer auf E.164 (+49...) normalisieren — fuer sauberen SMS-Versand
+function normalizeTelefon(roh) {
+  if (!roh) return '';
+  let n = String(roh).trim();
+  // Alles ausser Ziffern und fuehrendem + entfernen
+  const hatPlus = n.startsWith('+');
+  n = n.replace(/[^0-9]/g, '');
+  if (!n) return '';
+  // 00-Praefix (international) -> entfernen
+  if (n.startsWith('00')) n = n.slice(2);
+  // bereits mit 49 -> so lassen
+  if (n.startsWith('49')) return '+' + n;
+  // mit fuehrender 0 (nationale Schreibweise) -> 0 weg, +49
+  if (n.startsWith('0')) return '+49' + n.slice(1);
+  // "nackte" Nummer (z.B. 1795424393, fuehrende 0 von Sheets verschluckt) -> +49
+  if (n.startsWith('1') || hatPlus) return '+49' + n;
+  // Fallback: unveraendert mit + (z.B. auslaendische Nummer)
+  return '+' + n;
+}
+
 // ====================================================================
 // Haupt-Komponente
 // ====================================================================
@@ -106,7 +126,7 @@ export default function App() {
         let s = a.status;
         if (s === 'Neu') s = 'Offen';
         else if (s === 'Angeboten') s = 'In Bearbeitung';
-        return { ...a, status: s };
+        return { ...a, status: s, telefon: normalizeTelefon(a.telefon) };
       });
       setAnfragen(migriert); setLetzteAenderung(new Date());
     } catch (e) {
@@ -145,7 +165,7 @@ export default function App() {
   const addAnfrage = (data) => {
     const neu = {
       id: neueId(), eingangsdatum: heute(), quelle: data.quelle, name: data.name,
-      telefon: data.telefon, email: data.email || '', anliegen: data.anliegen,
+      telefon: normalizeTelefon(data.telefon), email: data.email || '', anliegen: data.anliegen,
       prioritaet: data.prioritaet, status: 'Offen', bearbeiter: 'Unzugewiesen',
       schritt: '', followupDatum:'', followupZeit:'', notizen:'',
       history: [historyEintrag('Erstellt', currentUser, 'Manuell erfasst')], reminderStatus:'', weitergeleitetAn:'',
@@ -157,7 +177,8 @@ export default function App() {
     setShowNewForm(false);
   };
   const updateAnfrage = (updated, besch='Aktualisiert') => {
-    persist(anfragen.map((a) => a.id===updated.id ? { ...updated, history:[...(updated.history||[]), historyEintrag('Aktualisiert', currentUser, besch)] } : a));
+    const norm = { ...updated, telefon: normalizeTelefon(updated.telefon) };
+    persist(anfragen.map((a) => a.id===norm.id ? { ...norm, history:[...(norm.history||[]), historyEintrag('Aktualisiert', currentUser, besch)] } : a));
     setSelectedAnfrage(null);
   };
 
