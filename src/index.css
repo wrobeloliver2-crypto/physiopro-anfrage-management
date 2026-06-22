@@ -226,3 +226,6 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 /* Ergebnis-Chip im Mülleimer */
 .muell-ergebnis { display:inline-flex; align-items:center; gap:4px; font-size:11px; background:var(--beige-warm); color:var(--beige-dunkel); padding:3px 9px; border-radius:7px; width:fit-content; margin:2px 0; }
 .muell-ergebnis-termin { background:var(--gruen-hell); color:var(--gruen-dunkel); font-weight:500; }
+/* Terminabsage-Chip (bernstein, abgesetzt von Termin=grün) */
+.erg-chip-absage { background:var(--bernstein-hell); color:#fff; font-weight:500; }
+.muell-ergebnis-absage { background:#f7e9d6; color:var(--bernstein); font-weight:500; }

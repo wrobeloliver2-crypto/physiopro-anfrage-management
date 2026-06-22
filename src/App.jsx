@@ -4,7 +4,7 @@ import {
   X, Trash2, Calendar, User, Globe, Check, RefreshCw, StickyNote,
   PhoneCall, Pin, ArrowRight, ArrowLeft, Send, Inbox, UserCheck,
   Search, FileText, PhoneOff, CalendarCheck, Hourglass, RotateCcw,
-  CheckCircle2, Frown,
+  CheckCircle2, Frown, CalendarX,
 } from 'lucide-react';
 
 // ====================================================================
@@ -34,6 +34,11 @@ const ERGEBNIS_GRUPPEN = [
     'Termin vereinbart – Osteopathie / Julia',
     'Termin vereinbart – Physiocoaching / Hanna',
   ]},
+  { titel: 'Terminabsage', optionen: [
+    'Terminabsage – rechtzeitig (>24h)',
+    'Terminabsage – kurzfristig (<24h, mit Ausfallrechnung)',
+    'Terminabsage – kurzfristig (<24h, ohne Ausfallrechnung)',
+  ]},
   { titel: 'Kein Ergebnis – Patient', optionen: [
     'Nicht erreichbar – kein Termin',
     'Kein Interesse / zurückgezogen',
@@ -52,6 +57,9 @@ const ERGEBNIS_GRUPPEN = [
 ];
 const ALLE_ERGEBNISSE = ERGEBNIS_GRUPPEN.flatMap((g) => g.optionen);
 const istTerminErgebnis = (e) => typeof e === 'string' && e.startsWith('Termin vereinbart');
+const istAbsage = (e) => typeof e === 'string' && e.startsWith('Terminabsage');
+// Diese Absage-Option schließt NICHT ab, sondern erzwingt erst "Ausfallrechnung schreiben" (To Do).
+const ERGEBNIS_AUSFALLRECHNUNG = 'Terminabsage – kurzfristig (<24h, mit Ausfallrechnung)';
 
 // Uhrzeit-Slots 08:00–18:00 in 30-Min-Schritten
 const ZEIT_SLOTS = (() => {
@@ -241,6 +249,11 @@ export default function App() {
       setErgebnisAnfrage({ ...updated, telefon: normalizeTelefon(updated.telefon) });
       return;
     }
+    // Erledigt MIT Ergebnis über cardErledigt leiten → einheitliche Ausfallrechnung-Logik
+    if (updated.status === 'Erledigt' && updated.ergebnis) {
+      cardErledigt({ ...updated, telefon: normalizeTelefon(updated.telefon), status: anfragen.find((a)=>a.id===updated.id)?.status || updated.status }, updated.ergebnis);
+      return;
+    }
     const norm = { ...updated, telefon: normalizeTelefon(updated.telefon) };
     persist(anfragen.map((a) => a.id===norm.id ? { ...norm, history:[...(norm.history||[]), historyEintrag('Aktualisiert', currentUser, besch)] } : a));
     setSelectedAnfrage(null);
@@ -248,8 +261,12 @@ export default function App() {
 
   // Karten-Aktionen (Workflow-Buttons)
   const cardMove = (anfrage, neuerStatus) => {
-    // Abschluss erfordert ein Ergebnis → Popup öffnen statt direkt verschieben
-    if (neuerStatus === 'Erledigt') { setErgebnisAnfrage(anfrage); return; }
+    if (neuerStatus === 'Erledigt') {
+      // Ergebnis bereits gesetzt (z.B. Ausfallrechnung-Fall): direkt abschließen, kein Popup.
+      if (anfrage.ergebnis) { cardErledigt(anfrage, anfrage.ergebnis); return; }
+      // Sonst Pflicht-Popup öffnen statt direkt verschieben.
+      setErgebnisAnfrage(anfrage); return;
+    }
     persist(anfragen.map((a) => a.id===anfrage.id ? {
       ...a, status: neuerStatus,
       bearbeiter: (neuerStatus==='In Bearbeitung' && a.bearbeiter==='Unzugewiesen') ? currentUser : a.bearbeiter,
@@ -258,6 +275,22 @@ export default function App() {
   };
   // Abschluss mit Ergebnis (aus dem Pflicht-Popup)
   const cardErledigt = (anfrage, ergebnis) => {
+    // Sonderfall: kurzfristige Absage MIT Ausfallrechnung → nicht erledigen,
+    // sondern in To Do mit Schritt "Ausfallrechnung schreiben". Ergebnis wird
+    // schon gespeichert. Erst der nächste Erledigt-Klick schließt ab (ohne Popup,
+    // da ergebnis dann bereits gesetzt ist).
+    // Greift nur beim ERSTEN Mal: ist die Karte schon im Ausfallrechnung-To-Do,
+    // ist dieser Klick die Bestätigung → normal abschließen.
+    const schonImAusfall = anfrage.status === 'To Do' && anfrage.schritt === 'Ausfallrechnung schreiben' && anfrage.ergebnis === ERGEBNIS_AUSFALLRECHNUNG;
+    if (ergebnis === ERGEBNIS_AUSFALLRECHNUNG && !schonImAusfall) {
+      persist(anfragen.map((a) => a.id===anfrage.id ? {
+        ...a, ...anfrage, status: 'To Do', ergebnis, schritt: 'Ausfallrechnung schreiben',
+        bearbeiter: (anfrage.bearbeiter && anfrage.bearbeiter!=='Unzugewiesen') ? anfrage.bearbeiter : currentUser,
+        history:[...(anfrage.history || a.history || []), historyEintrag('Ergebnis', currentUser, ergebnis), historyEintrag('Schritt', currentUser, 'Ausfallrechnung schreiben (vor Abschluss)')]
+      } : a));
+      setErgebnisAnfrage(null); setSelectedAnfrage(null);
+      return;
+    }
     persist(anfragen.map((a) => a.id===anfrage.id ? {
       ...a, ...anfrage, status: 'Erledigt', ergebnis,
       bearbeiter: (anfrage.bearbeiter && anfrage.bearbeiter!=='Unzugewiesen') ? anfrage.bearbeiter : currentUser,
@@ -534,8 +567,8 @@ function Muelleimer({ anfragen, isReadOnly, onCardClick, onZurueckholen }) {
                 <span className="muell-name">{a.name || '(ohne Name)'}</span>
                 <span className="muell-anliegen">{a.anliegen}</span>
                 {a.ergebnis && (
-                  <span className={'muell-ergebnis'+(istTerminErgebnis(a.ergebnis)?' muell-ergebnis-termin':'')}>
-                    {istTerminErgebnis(a.ergebnis) ? <CalendarCheck size={11} /> : <CheckCircle2 size={11} />} {a.ergebnis}
+                  <span className={'muell-ergebnis'+(istTerminErgebnis(a.ergebnis)?' muell-ergebnis-termin':'')+(istAbsage(a.ergebnis)?' muell-ergebnis-absage':'')}>
+                    {istTerminErgebnis(a.ergebnis) ? <CalendarCheck size={11} /> : istAbsage(a.ergebnis) ? <CalendarX size={11} /> : <CheckCircle2 size={11} />} {a.ergebnis}
                   </span>
                 )}
                 <span className="muell-meta">
@@ -646,7 +679,7 @@ function ErgebnisModal({ anfrage, onClose, onConfirm }) {
                   <button key={o}
                     className={'erg-option'+(auswahl===o?' aktiv':'')+(g.primaer?' erg-primaer':'')}
                     onClick={() => setAuswahl(o)}>
-                    {istTerminErgebnis(o) ? <CalendarCheck size={14} /> : g.titel.startsWith('Kein') ? <Frown size={14} /> : <FileText size={14} />}
+                    {istTerminErgebnis(o) ? <CalendarCheck size={14} /> : istAbsage(o) ? <CalendarX size={14} /> : g.titel.startsWith('Kein') ? <Frown size={14} /> : <FileText size={14} />}
                     {o}
                   </button>
                 ))}
@@ -711,8 +744,8 @@ function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, o
             <div className="feld">
               <label>Ergebnis</label>
               <div className="erg-anzeige">
-                <span className={'erg-chip'+(istTerminErgebnis(anfrage.ergebnis)?' erg-chip-termin':'')}>
-                  {istTerminErgebnis(anfrage.ergebnis) ? <CalendarCheck size={13} /> : <CheckCircle2 size={13} />} {anfrage.ergebnis}
+                <span className={'erg-chip'+(istTerminErgebnis(anfrage.ergebnis)?' erg-chip-termin':'')+(istAbsage(anfrage.ergebnis)?' erg-chip-absage':'')}>
+                  {istTerminErgebnis(anfrage.ergebnis) ? <CalendarCheck size={13} /> : istAbsage(anfrage.ergebnis) ? <CalendarX size={13} /> : <CheckCircle2 size={13} />} {anfrage.ergebnis}
                 </span>
               </div>
             </div>
