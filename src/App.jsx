@@ -227,7 +227,7 @@ export default function App() {
       telefon: normalizeTelefon(data.telefon), email: data.email || '', anliegen: data.anliegen,
       prioritaet: data.prioritaet, status: 'Offen', bearbeiter: 'Unzugewiesen',
       schritt: '', followupDatum:'', followupZeit:'', notizen:'', ergebnis:'',
-      history: [historyEintrag('Erstellt', currentUser, 'Manuell erfasst')], reminderStatus:'', weitergeleitetAn:'',
+      history: [historyEintrag('Erstellt', currentUser, 'Manuell erfasst')], reminderStatus:'', weitergeleitetAn:'', letzterReminder:'',
     };
     persist([...anfragen, neu]); setShowNewForm(false);
   };
