@@ -4,6 +4,7 @@ import {
   X, Trash2, Calendar, User, Globe, Check, RefreshCw, StickyNote,
   PhoneCall, Pin, ArrowRight, ArrowLeft, Send, Inbox, UserCheck,
   Search, FileText, PhoneOff, CalendarCheck, Hourglass, RotateCcw,
+  CheckCircle2, Frown,
 } from 'lucide-react';
 
 // ====================================================================
@@ -25,6 +26,32 @@ const ALLE_USER = ['Luca', 'Finn', 'Annika', 'Oliver Wrobel', 'Hanna Wrobel'];
 // Bearbeitungs-Schritte, getrennt nach aktiv (In Bearbeitung) / haengt (To Do)
 const SCHRITTE_AKTIV = ['Rückruf vereinbart', 'Prüfe Terminverfügbarkeit', 'Termin wird abgestimmt'];
 const SCHRITTE_HAENGT = ['Angerufen – niemand erreicht', 'Wartet auf Rezept/Unterlagen', 'Wartet auf Rückmeldung Patient', 'In Medifox storniert', 'Ausfallrechnung schreiben'];
+
+// Ergebnis-Optionen (Pflicht beim Abschließen). Gruppiert für das Erledigt-Popup.
+const ERGEBNIS_GRUPPEN = [
+  { titel: 'Termin vereinbart', primaer: true, optionen: [
+    'Termin vereinbart – Physiotherapie',
+    'Termin vereinbart – Osteopathie / Julia',
+    'Termin vereinbart – Physiocoaching / Hanna',
+  ]},
+  { titel: 'Kein Ergebnis – Patient', optionen: [
+    'Nicht erreichbar – kein Termin',
+    'Kein Interesse / zurückgezogen',
+    'Rezept fehlt – Patient meldet sich nicht',
+    'Patient nicht versorgungsfähig',
+  ]},
+  { titel: 'Kein Ergebnis – Praxis', optionen: [
+    'Kein freier Termin – Warteliste angeboten',
+    'Außerhalb Versorgungsbereich',
+    'Weiterverwiesen an andere Praxis',
+  ]},
+  { titel: 'Sonstiges', optionen: [
+    'Doppelte Anfrage / bereits erfasst',
+    'Testanfrage / intern',
+  ]},
+];
+const ALLE_ERGEBNISSE = ERGEBNIS_GRUPPEN.flatMap((g) => g.optionen);
+const istTerminErgebnis = (e) => typeof e === 'string' && e.startsWith('Termin vereinbart');
 
 // Uhrzeit-Slots 08:00–18:00 in 30-Min-Schritten
 const ZEIT_SLOTS = (() => {
@@ -123,6 +150,7 @@ export default function App() {
   const [showNewForm, setShowNewForm] = useState(false);
   const [selectedAnfrage, setSelectedAnfrage] = useState(null);
   const [weiterleitenAnfrage, setWeiterleitenAnfrage] = useState(null);
+  const [ergebnisAnfrage, setErgebnisAnfrage] = useState(null);
   const [error, setError] = useState(null);
   const [letzteAenderung, setLetzteAenderung] = useState(null);
   const [ansicht, setAnsicht] = useState('aktiv'); // 'aktiv' | 'muelleimer'
@@ -198,7 +226,7 @@ export default function App() {
       id: neueId(), eingangsdatum: heute(), quelle: data.quelle, name: data.name,
       telefon: normalizeTelefon(data.telefon), email: data.email || '', anliegen: data.anliegen,
       prioritaet: data.prioritaet, status: 'Offen', bearbeiter: 'Unzugewiesen',
-      schritt: '', followupDatum:'', followupZeit:'', notizen:'',
+      schritt: '', followupDatum:'', followupZeit:'', notizen:'', ergebnis:'',
       history: [historyEintrag('Erstellt', currentUser, 'Manuell erfasst')], reminderStatus:'', weitergeleitetAn:'',
     };
     persist([...anfragen, neu]); setShowNewForm(false);
@@ -208,6 +236,11 @@ export default function App() {
     setShowNewForm(false);
   };
   const updateAnfrage = (updated, besch='Aktualisiert') => {
+    // Im Modal auf "Erledigt" gesetzt, aber noch kein Ergebnis → Pflicht-Popup
+    if (updated.status === 'Erledigt' && !updated.ergebnis) {
+      setErgebnisAnfrage({ ...updated, telefon: normalizeTelefon(updated.telefon) });
+      return;
+    }
     const norm = { ...updated, telefon: normalizeTelefon(updated.telefon) };
     persist(anfragen.map((a) => a.id===norm.id ? { ...norm, history:[...(norm.history||[]), historyEintrag('Aktualisiert', currentUser, besch)] } : a));
     setSelectedAnfrage(null);
@@ -215,11 +248,22 @@ export default function App() {
 
   // Karten-Aktionen (Workflow-Buttons)
   const cardMove = (anfrage, neuerStatus) => {
+    // Abschluss erfordert ein Ergebnis → Popup öffnen statt direkt verschieben
+    if (neuerStatus === 'Erledigt') { setErgebnisAnfrage(anfrage); return; }
     persist(anfragen.map((a) => a.id===anfrage.id ? {
       ...a, status: neuerStatus,
       bearbeiter: (neuerStatus==='In Bearbeitung' && a.bearbeiter==='Unzugewiesen') ? currentUser : a.bearbeiter,
       history:[...a.history, historyEintrag('Status', currentUser, a.status+' → '+neuerStatus)]
     } : a));
+  };
+  // Abschluss mit Ergebnis (aus dem Pflicht-Popup)
+  const cardErledigt = (anfrage, ergebnis) => {
+    persist(anfragen.map((a) => a.id===anfrage.id ? {
+      ...a, ...anfrage, status: 'Erledigt', ergebnis,
+      bearbeiter: (anfrage.bearbeiter && anfrage.bearbeiter!=='Unzugewiesen') ? anfrage.bearbeiter : currentUser,
+      history:[...(anfrage.history || a.history || []), historyEintrag('Status', currentUser, (anfrage.status||a.status)+' → Erledigt'), historyEintrag('Ergebnis', currentUser, ergebnis)]
+    } : a));
+    setErgebnisAnfrage(null); setSelectedAnfrage(null);
   };
   const cardSetSchritt = (anfrage, schritt) => {
     persist(anfragen.map((a) => a.id===anfrage.id ? { ...a, schritt, history:[...a.history, historyEintrag('Schritt', currentUser, schritt)] } : a));
@@ -308,6 +352,9 @@ export default function App() {
         )}
         {weiterleitenAnfrage && (
           <WeiterleitenModal anfrage={weiterleitenAnfrage} onClose={() => setWeiterleitenAnfrage(null)} onConfirm={weiterleiten} />
+        )}
+        {ergebnisAnfrage && (
+          <ErgebnisModal anfrage={ergebnisAnfrage} onClose={() => setErgebnisAnfrage(null)} onConfirm={cardErledigt} />
         )}
         {showNewForm && !isReadOnly && (
           <NeueAnfrageForm onClose={() => setShowNewForm(false)} onSubmit={addAnfrage} onMerge={mergeAnfrage} checkDuplicate={checkDuplicate} />
@@ -486,6 +533,11 @@ function Muelleimer({ anfragen, isReadOnly, onCardClick, onZurueckholen }) {
               <div className="muell-haupt">
                 <span className="muell-name">{a.name || '(ohne Name)'}</span>
                 <span className="muell-anliegen">{a.anliegen}</span>
+                {a.ergebnis && (
+                  <span className={'muell-ergebnis'+(istTerminErgebnis(a.ergebnis)?' muell-ergebnis-termin':'')}>
+                    {istTerminErgebnis(a.ergebnis) ? <CalendarCheck size={11} /> : <CheckCircle2 size={11} />} {a.ergebnis}
+                  </span>
+                )}
                 <span className="muell-meta">
                   <Check size={11} /> erledigt {wann}
                   {verbleibend !== null && <span className="muell-rest"> · noch {verbleibend} Tag{verbleibend===1?'':'e'}</span>}
@@ -570,6 +622,54 @@ function WeiterleitenModal({ anfrage, onClose, onConfirm }) {
 }
 
 // ====================================================================
+// ErgebnisModal (Pflicht-Auswahl beim Abschließen)
+// ====================================================================
+function ErgebnisModal({ anfrage, onClose, onConfirm }) {
+  const [auswahl, setAuswahl] = useState('');
+  const [alleZeigen, setAlleZeigen] = useState(false);
+  const gruppen = alleZeigen ? ERGEBNIS_GRUPPEN : ERGEBNIS_GRUPPEN.slice(0, 2);
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal modal-schmal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-kopf modal-kopf-gruen">
+          <h2><Check size={17} style={{ verticalAlign:'-3px', marginRight:6 }} /> Anfrage abschließen</h2>
+          <button onClick={onClose} aria-label="Schliessen"><X size={20} /></button>
+        </div>
+        <div className="modal-body">
+          <p className="erg-name">{anfrage.name}</p>
+          <p className="erg-frage">Welches Ergebnis hatte die Anfrage?</p>
+          {gruppen.map((g) => (
+            <div className="erg-gruppe" key={g.titel}>
+              <p className="erg-gruppe-titel">{g.titel}</p>
+              <div className="erg-optionen">
+                {g.optionen.map((o) => (
+                  <button key={o}
+                    className={'erg-option'+(auswahl===o?' aktiv':'')+(g.primaer?' erg-primaer':'')}
+                    onClick={() => setAuswahl(o)}>
+                    {istTerminErgebnis(o) ? <CalendarCheck size={14} /> : g.titel.startsWith('Kein') ? <Frown size={14} /> : <FileText size={14} />}
+                    {o}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+          {!alleZeigen && (
+            <button className="erg-mehr" onClick={() => setAlleZeigen(true)}>… weitere Gründe</button>
+          )}
+        </div>
+        <div className="modal-fuss">
+          <button className="abbrechen-btn" onClick={onClose}>Abbrechen</button>
+          <button className="speichern-btn" disabled={!auswahl} onClick={() => auswahl && onConfirm(anfrage, auswahl)}>
+            Erledigt
+          </button>
+        </div>
+        {!auswahl && <p className="erg-hinweis">Ohne Auswahl nicht möglich</p>}
+      </div>
+    </div>
+  );
+}
+
+// ====================================================================
 // AnfragenModal (Detail / Edit)
 // ====================================================================
 function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, onDelete, onWeiterleiten }) {
@@ -607,6 +707,16 @@ function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, o
               </div>
             )}
           </div>
+          {anfrage.ergebnis && (
+            <div className="feld">
+              <label>Ergebnis</label>
+              <div className="erg-anzeige">
+                <span className={'erg-chip'+(istTerminErgebnis(anfrage.ergebnis)?' erg-chip-termin':'')}>
+                  {istTerminErgebnis(anfrage.ergebnis) ? <CalendarCheck size={13} /> : <CheckCircle2 size={13} />} {anfrage.ergebnis}
+                </span>
+              </div>
+            </div>
+          )}
           {(form.status==='In Bearbeitung' || form.status==='To Do') && !isReadOnly && (
             <div className="feld">
               <label>Bearbeitungs-Schritt</label>

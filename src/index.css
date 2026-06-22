@@ -203,3 +203,26 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 .muell-rest { color:var(--bernstein); }
 .muell-zurueck { display:flex; align-items:center; gap:5px; flex-shrink:0; font-family:var(--sans); font-size:12px; font-weight:500; color:var(--gruen-dunkel); background:var(--gruen-hell); border:none; border-radius:100px; padding:7px 13px; cursor:pointer; transition:.15s; }
 .muell-zurueck:hover { background:var(--gruen); color:#fff; }
+
+/* ---- Ergebnis-Feld (Pflicht beim Abschließen) ---- */
+.modal-kopf-gruen { background:var(--gruen); }
+.erg-name { font-size:15px; font-weight:500; color:var(--text); margin:0 0 2px; }
+.erg-frage { font-size:13px; color:var(--grau); margin:0 0 14px; }
+.erg-gruppe { margin-bottom:12px; }
+.erg-gruppe-titel { font-size:10px; text-transform:uppercase; letter-spacing:.04em; color:var(--grau-hell); margin:0 0 6px; }
+.erg-optionen { display:flex; flex-direction:column; gap:6px; }
+.erg-option { text-align:left; padding:9px 12px; border-radius:8px; border:1px solid var(--beige-mid); background:#fff; font-family:var(--sans); font-size:13px; color:var(--text); cursor:pointer; display:flex; align-items:center; gap:8px; transition:.12s; }
+.erg-option:hover { border-color:var(--beige); background:var(--creme); }
+.erg-option.aktiv { border:2px solid var(--gruen); background:var(--gruen-hell); color:var(--gruen-dunkel); font-weight:500; }
+.erg-primaer.aktiv { border-color:var(--gruen); }
+.erg-mehr { background:none; border:none; color:var(--grau); font-family:var(--sans); font-size:13px; cursor:pointer; padding:4px 0; }
+.erg-mehr:hover { color:var(--gruen); }
+.erg-hinweis { font-size:11px; color:var(--grau-hell); text-align:center; padding:0 0 12px; margin:-4px 0 0; }
+.speichern-btn:disabled { opacity:.45; cursor:not-allowed; }
+/* Ergebnis-Anzeige im Detail-Modal */
+.erg-anzeige { display:flex; }
+.erg-chip { display:inline-flex; align-items:center; gap:5px; font-size:12px; background:var(--gruen-hell); color:var(--gruen-dunkel); padding:5px 11px; border-radius:8px; }
+.erg-chip-termin { background:var(--gruen-hell); color:var(--gruen-dunkel); font-weight:500; }
+/* Ergebnis-Chip im Mülleimer */
+.muell-ergebnis { display:inline-flex; align-items:center; gap:4px; font-size:11px; background:var(--beige-warm); color:var(--beige-dunkel); padding:3px 9px; border-radius:7px; width:fit-content; margin:2px 0; }
+.muell-ergebnis-termin { background:var(--gruen-hell); color:var(--gruen-dunkel); font-weight:500; }

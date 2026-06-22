@@ -29,6 +29,7 @@ const COLUMNS = [
   '__powerAppsId',
   'schritt',
   'weitergeleitetAn',
+  'ergebnis',
 ];
 
 // ---- Auth (Service Account) ----
@@ -105,7 +106,7 @@ exports.handler = async (event) => {
   try {
     const sheets = getSheets();
     const tab = await ersterTabName(sheets, SHEET_ID);
-    const RANGE = tab + '!A2:R1000';
+    const RANGE = tab + '!A2:S1000';
 
     // -------------------- READ --------------------
     if (event.httpMethod === 'GET') {
