@@ -43,6 +43,11 @@ const COLUMNS = [
   'weitergeleitetAn', // R
   'letzterReminder',  // S  (leer lassen)
   'ergebnis',         // T  (leer lassen)
+  'utm_source',       // U
+  'utm_medium',       // V
+  'utm_campaign',     // W
+  'utm_content',      // X
+  'gclid',            // Y
 ];
 
 // ---- Telefon-Normalisierung (IDENTISCH zum Dashboard / App.jsx) ----
@@ -163,6 +168,11 @@ exports.handler = async (event) => {
     weitergeleitetAn: '',
     letzterReminder: '', // S leer
     ergebnis: '',        // T leer
+    utm_source:   payload.utm_source   || '', // U
+    utm_medium:   payload.utm_medium   || '', // V
+    utm_campaign: payload.utm_campaign || '', // W
+    utm_content:  payload.utm_content  || '', // X
+    gclid:        payload.gclid        || '', // Y
   };
 
   const row = COLUMNS.map((k) => (obj[k] !== undefined && obj[k] !== null ? String(obj[k]) : ''));

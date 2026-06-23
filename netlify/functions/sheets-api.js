@@ -31,6 +31,11 @@ const COLUMNS = [
   'weitergeleitetAn',
   'letzterReminder',
   'ergebnis',
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_content',
+  'gclid',
 ];
 
 // ---- Auth (Service Account) ----
@@ -107,7 +112,7 @@ exports.handler = async (event) => {
   try {
     const sheets = getSheets();
     const tab = await ersterTabName(sheets, SHEET_ID);
-    const RANGE = tab + '!A2:T1000';
+    const RANGE = tab + '!A2:Y1000';
 
     // -------------------- READ --------------------
     if (event.httpMethod === 'GET') {
