@@ -229,3 +229,7 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 /* Terminabsage-Chip (bernstein, abgesetzt von Termin=grün) */
 .erg-chip-absage { background:var(--bernstein-hell); color:#fff; font-weight:500; }
 .muell-ergebnis-absage { background:#f7e9d6; color:var(--bernstein); font-weight:500; }
+
+/* Google Ads Kanal-Chip auf der Karte */
+.karte-ads-chip { display:flex; align-items:center; gap:5px; font-size:11px; color:#1a5276; background:#d6eaf8; padding:4px 9px; border-radius:7px; margin-top:6px; line-height:1.4; }
+.karte-ads-chip svg { flex-shrink:0; color:#1a5276; }

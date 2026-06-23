@@ -4,7 +4,7 @@ import {
   X, Trash2, Calendar, User, Globe, Check, RefreshCw, StickyNote,
   PhoneCall, Pin, ArrowRight, ArrowLeft, Send, Inbox, UserCheck,
   Search, FileText, PhoneOff, CalendarCheck, Hourglass, RotateCcw,
-  CheckCircle2, Frown, CalendarX,
+  CheckCircle2, Frown, CalendarX, Megaphone,
 } from 'lucide-react';
 
 // ====================================================================
@@ -501,6 +501,17 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
         {anfrage.bearbeiter && anfrage.bearbeiter!=='Unzugewiesen' && <span className="karte-bearb"><User size={12} /> {anfrage.bearbeiter}</span>}
       </div>
 
+      {anfrage.utm_source && (
+        <div className="karte-ads-chip">
+          <Megaphone size={11} />
+          <span>
+            {anfrage.utm_source}{anfrage.utm_medium ? ' / ' + anfrage.utm_medium : ''}
+            {anfrage.utm_campaign ? ' — ' + anfrage.utm_campaign : ''}
+            {anfrage.utm_content ? ' · ' + anfrage.utm_content : ''}
+          </span>
+        </div>
+      )}
+
       {anfrage.notizen && (
         <div className={'karte-notiz'+(istTodo?' notiz-todo':'')}><StickyNote size={11} /> {anfrage.notizen}</div>
       )}
@@ -724,6 +735,10 @@ function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, o
             <InfoCard icon={<Phone size={14} />} label="Telefon" value={anfrage.telefon || '-'} />
             <InfoCard icon={<Mail size={14} />} label="E-Mail" value={anfrage.email || '-'} />
             <InfoCard icon={<Globe size={14} />} label="Quelle" value={anfrage.quelle} />
+            {anfrage.utm_source && (
+              <InfoCard icon={<Megaphone size={14} />} label="Werbekanal"
+                value={[anfrage.utm_source, anfrage.utm_medium, anfrage.utm_campaign, anfrage.utm_content].filter(Boolean).join(' / ')} />
+            )}
           </div>
           <div className="feld">
             <label>Anliegen</label>
