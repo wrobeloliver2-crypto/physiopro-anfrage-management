@@ -4,14 +4,16 @@ import {
   X, Trash2, Calendar, User, Globe, Check, RefreshCw, StickyNote,
   PhoneCall, Pin, ArrowRight, ArrowLeft, Send, Inbox, UserCheck,
   Search, FileText, PhoneOff, CalendarCheck, Hourglass, RotateCcw,
-  CheckCircle2, Frown, CalendarX, Megaphone,
+  CheckCircle2, Frown, CalendarX, Megaphone, Archive,
 } from 'lucide-react';
 
 // ====================================================================
 // Konfiguration
 // ====================================================================
-const BACKEND_BASE =
-  import.meta.env.VITE_BACKEND_BASE || 'https://leadmanagementphysiopro.netlify.app';
+// BACKEND_BASE leer = relativ zur eigenen Domain. Damit nutzt der develop-Deploy
+// automatisch seine eigene Function (Test-Sheet), der main-Deploy seine (Live-Sheet).
+// Nur als Override (z.B. lokale Entwicklung) kann VITE_BACKEND_BASE gesetzt werden.
+const BACKEND_BASE = import.meta.env.VITE_BACKEND_BASE || '';
 const API_URL = BACKEND_BASE + '/.netlify/functions/sheets-api';
 const NOTES_URL = BACKEND_BASE + '/.netlify/functions/notes-api';
 
@@ -159,6 +161,7 @@ export default function App() {
   const [selectedAnfrage, setSelectedAnfrage] = useState(null);
   const [weiterleitenAnfrage, setWeiterleitenAnfrage] = useState(null);
   const [ergebnisAnfrage, setErgebnisAnfrage] = useState(null);
+  const [mailtoAnfrage, setMailtoAnfrage] = useState(null); // { anfrage, ergebnis } für E-Mail-Modal
   const [error, setError] = useState(null);
   const [letzteAenderung, setLetzteAenderung] = useState(null);
   const [ansicht, setAnsicht] = useState('aktiv'); // 'aktiv' | 'muelleimer'
@@ -187,15 +190,10 @@ export default function App() {
         else if (s === 'Angeboten') s = 'In Bearbeitung';
         return { ...a, status: s, telefon: normalizeTelefon(a.telefon) };
       });
-      // Mülleimer-Aufräumung: Erledigte, deren Erledigt-Zeitpunkt > 14 Tage her ist,
-      // werden aus der Liste entfernt → fallen beim nächsten Speichern aus dem Sheet.
-      // Erledigte ohne erkennbaren Erledigt-Zeitstempel (Altdaten) bleiben erhalten.
-      const bereinigt = migriert.filter((a) => {
-        if (a.status !== 'Erledigt') return true;
-        const t = tageSeitErledigt(a);
-        return t === null || t < 14;
-      });
-      setAnfragen(bereinigt); setLetzteAenderung(new Date());
+      // Alle Daten bleiben erhalten (auch ältere Erledigte) → für spätere Auswertung.
+      // Die Begrenzung auf 14 Tage erfolgt NUR bei der Archiv-Anzeige, nicht beim
+      // Laden/Speichern. Damit fällt nichts mehr aus dem Sheet.
+      setAnfragen(migriert); setLetzteAenderung(new Date());
     } catch (e) {
       if (versuch < 2) { setTimeout(() => loadFromSheets(versuch+1), 3000); return; }
       setError(e.message || 'Verbindung fehlgeschlagen');
@@ -291,12 +289,17 @@ export default function App() {
       setErgebnisAnfrage(null); setSelectedAnfrage(null);
       return;
     }
+    const abgeschlosseneAnfrage = { ...anfrage, status: 'Erledigt', ergebnis };
     persist(anfragen.map((a) => a.id===anfrage.id ? {
       ...a, ...anfrage, status: 'Erledigt', ergebnis,
       bearbeiter: (anfrage.bearbeiter && anfrage.bearbeiter!=='Unzugewiesen') ? anfrage.bearbeiter : currentUser,
       history:[...(anfrage.history || a.history || []), historyEintrag('Status', currentUser, (anfrage.status||a.status)+' → Erledigt'), historyEintrag('Ergebnis', currentUser, ergebnis)]
     } : a));
     setErgebnisAnfrage(null); setSelectedAnfrage(null);
+    // E-Mail-Modal nur wenn: Termin-Ergebnis UND E-Mail-Adresse vorhanden
+    if (istTerminErgebnis(ergebnis) && anfrage.email && anfrage.email.trim()) {
+      setMailtoAnfrage({ anfrage: abgeschlosseneAnfrage, ergebnis });
+    }
   };
   const cardSetSchritt = (anfrage, schritt) => {
     persist(anfragen.map((a) => a.id===anfrage.id ? { ...a, schritt, history:[...a.history, historyEintrag('Schritt', currentUser, schritt)] } : a));
@@ -356,7 +359,7 @@ export default function App() {
               <Inbox size={14} /> Aktiv
             </button>
             <button className={'ansicht-tab'+(ansicht==='muelleimer'?' aktiv':'')} onClick={() => setAnsicht('muelleimer')}>
-              <Trash2 size={14} /> Mülleimer{muelleimer.length ? ' ('+muelleimer.length+')' : ''}
+              <Archive size={14} /> Archiv{muelleimer.length ? ' ('+muelleimer.length+')' : ''}
             </button>
           </div>
           {loading && anfragen.length===0 ? (
@@ -388,6 +391,11 @@ export default function App() {
         )}
         {ergebnisAnfrage && (
           <ErgebnisModal anfrage={ergebnisAnfrage} onClose={() => setErgebnisAnfrage(null)} onConfirm={cardErledigt} />
+        )}
+        {mailtoAnfrage && (
+          <DraftModal anfrage={mailtoAnfrage.anfrage} ergebnis={mailtoAnfrage.ergebnis}
+            onClose={() => setMailtoAnfrage(null)}
+            onBack={() => { setMailtoAnfrage(null); setSelectedAnfrage(mailtoAnfrage.anfrage); }} />
         )}
         {showNewForm && !isReadOnly && (
           <NeueAnfrageForm onClose={() => setShowNewForm(false)} onSubmit={addAnfrage} onMerge={mergeAnfrage} checkDuplicate={checkDuplicate} />
@@ -555,16 +563,16 @@ function Muelleimer({ anfragen, isReadOnly, onCardClick, onZurueckholen }) {
   if (!anfragen.length) {
     return (
       <div className="muelleimer-leer">
-        <Trash2 size={28} />
-        <p>Keine erledigten Anfragen.</p>
-        <span>Erledigte Anfragen erscheinen hier 14 Tage lang und können zurückgeholt werden.</span>
+        <Archive size={28} />
+        <p>Noch keine abgeschlossenen Anfragen.</p>
+        <span>Abgeschlossene Anfragen werden hier archiviert und können zurückgeholt werden.</span>
       </div>
     );
   }
   return (
     <div className="muelleimer">
       <div className="muelleimer-hinweis">
-        <Trash2 size={13} /> Erledigt der letzten 14 Tage — danach automatisch entfernt.
+        <Archive size={13} /> Abgeschlossene Anfragen der letzten 14 Tage.
       </div>
       <div className="muelleimer-liste">
         {anfragen.map((a) => {
@@ -666,6 +674,131 @@ function WeiterleitenModal({ anfrage, onClose, onConfirm }) {
 }
 
 // ====================================================================
+// ====================================================================
+// DraftModal — Outlook-Entwurf mit HTML-Mail + PDF-Anhang erstellen
+// ====================================================================
+function DraftModal({ anfrage, ergebnis, onClose, onBack }) {
+  const [pdfDatei, setPdfDatei] = useState(null);   // { name, base64 }
+  const [status, setStatus] = useState('idle');     // idle | sende | ok | fehler
+  const [fehler, setFehler] = useState('');
+
+  // Behandlungsart aus dem Ergebnis ableiten
+  const behandlung = ergebnis.includes('Osteopathie') ? 'Osteopathie'
+    : ergebnis.includes('Physiocoaching') ? 'Physiocoaching'
+    : 'Physiotherapie';
+
+  const onPdfWahl = (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    if (f.type !== 'application/pdf') { setFehler('Bitte eine PDF-Datei auswählen.'); return; }
+    if (f.size > 4 * 1024 * 1024) { setFehler('PDF ist größer als 4 MB.'); return; }
+    setFehler('');
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = String(reader.result).split(',')[1] || '';
+      setPdfDatei({ name: f.name, base64 });
+    };
+    reader.onerror = () => setFehler('PDF konnte nicht gelesen werden.');
+    reader.readAsDataURL(f);
+  };
+
+  const entwurfErstellen = async () => {
+    setStatus('sende'); setFehler('');
+    try {
+      const res = await fetch('/.netlify/functions/draft-create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: anfrage.name,
+          email: anfrage.email,
+          behandlung,
+          pdfBase64: pdfDatei ? pdfDatei.base64 : null,
+          pdfName: pdfDatei ? pdfDatei.name : null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || ('Fehler ' + res.status));
+      }
+      setStatus('ok');
+    } catch (e) {
+      setStatus('fehler');
+      setFehler(e.message || 'Entwurf konnte nicht erstellt werden.');
+    }
+  };
+
+  // Erfolgs-Ansicht
+  if (status === 'ok') {
+    return (
+      <div className="modal-overlay">
+        <div className="modal modal-schmal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-kopf modal-kopf-gruen">
+            <h2><Check size={17} style={{ verticalAlign:'-3px', marginRight:6 }} /> Entwurf erstellt</h2>
+          </div>
+          <div className="modal-body">
+            <div className="draft-ok">
+              <CheckCircle2 size={40} />
+              <p className="draft-ok-titel">Der Entwurf liegt in Outlook bereit</p>
+              <p className="draft-ok-text">
+                Öffne in Outlook das Postfach <strong>info@physioproluebeck.de</strong> →
+                Ordner <strong>Entwürfe</strong>. Dort kannst du die Mail an
+                <strong> {anfrage.name}</strong> prüfen{pdfDatei ? ' (PDF ist angehängt)' : ''} und senden.
+              </p>
+            </div>
+          </div>
+          <div className="modal-fuss">
+            <span />
+            <button className="speichern-btn" onClick={onClose}>Fertig</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const sendet = status === 'sende';
+  return (
+    <div className="modal-overlay">
+      <div className="modal modal-schmal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-kopf modal-kopf-gruen">
+          <h2><Mail size={17} style={{ verticalAlign:'-3px', marginRight:6 }} /> Terminbestätigung als Outlook-Entwurf</h2>
+        </div>
+        <div className="modal-body">
+          <p className="erg-name">{anfrage.name}</p>
+          <p style={{ fontSize:'0.875rem', color:'var(--grau)', margin:'0 0 4px' }}>HTML-E-Mail ({behandlung}) an</p>
+          <p style={{ fontSize:'0.9rem', fontWeight:600, color:'var(--text)', margin:'0 0 18px', wordBreak:'break-all' }}>
+            {anfrage.email}
+          </p>
+
+          <label className="draft-pdf-feld">
+            <input type="file" accept="application/pdf" onChange={onPdfWahl} disabled={sendet} hidden />
+            <span className="draft-pdf-box">
+              {pdfDatei
+                ? <><FileText size={16} /> {pdfDatei.name} <span className="draft-pdf-wechseln">ändern</span></>
+                : <><Plus size={16} /> Termin-PDF auswählen</>}
+            </span>
+          </label>
+          <p className="draft-pdf-hinweis">
+            Optional. Das PDF wird automatisch an den Entwurf angehängt.
+          </p>
+
+          {fehler && <p className="draft-fehler">{fehler}</p>}
+        </div>
+        <div className="modal-fuss modal-fuss-3">
+          <button className="zurueck-btn" onClick={onBack} disabled={sendet}>
+            <ArrowLeft size={15} /> Zurück
+          </button>
+          <button className="abbrechen-btn" onClick={onClose} disabled={sendet}>Keine E-Mail</button>
+          <button className="speichern-btn" onClick={entwurfErstellen} disabled={sendet}
+            style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
+            {sendet ? <><Hourglass size={15} /> Erstelle…</> : <><Mail size={15} /> Entwurf erstellen</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ====================================================================
 // ErgebnisModal (Pflicht-Auswahl beim Abschließen)
 // ====================================================================
 function ErgebnisModal({ anfrage, onClose, onConfirm }) {
@@ -755,13 +888,19 @@ function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, o
               </div>
             )}
           </div>
-          {anfrage.ergebnis && (
+          {(form.ergebnis || anfrage.ergebnis) && (
             <div className="feld">
               <label>Ergebnis</label>
               <div className="erg-anzeige">
-                <span className={'erg-chip'+(istTerminErgebnis(anfrage.ergebnis)?' erg-chip-termin':'')+(istAbsage(anfrage.ergebnis)?' erg-chip-absage':'')}>
-                  {istTerminErgebnis(anfrage.ergebnis) ? <CalendarCheck size={13} /> : istAbsage(anfrage.ergebnis) ? <CalendarX size={13} /> : <CheckCircle2 size={13} />} {anfrage.ergebnis}
+                <span className={'erg-chip'+(istTerminErgebnis(form.ergebnis ?? anfrage.ergebnis)?' erg-chip-termin':'')+(istAbsage(form.ergebnis ?? anfrage.ergebnis)?' erg-chip-absage':'')}>
+                  {istTerminErgebnis(form.ergebnis ?? anfrage.ergebnis) ? <CalendarCheck size={13} /> : istAbsage(form.ergebnis ?? anfrage.ergebnis) ? <CalendarX size={13} /> : <CheckCircle2 size={13} />} {form.ergebnis ?? anfrage.ergebnis}
                 </span>
+                {!isReadOnly && (
+                  <button type="button" className="erg-entfernen" title="Ergebnis entfernen"
+                    onClick={() => { set('ergebnis', ''); if (form.status === 'Erledigt') set('status', 'In Bearbeitung'); }}>
+                    <X size={13} /> entfernen
+                  </button>
+                )}
               </div>
             </div>
           )}

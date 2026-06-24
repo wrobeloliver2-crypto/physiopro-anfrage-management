@@ -8,6 +8,11 @@
 [functions]
   node_bundler = "esbuild"
 
+# Testumgebung (develop-Branch)
+[context.develop]
+  command = "npm run build"
+  publish = "dist"
+
 # SPA Fallback: alle Routen auf index.html (ausser API-Funktionen)
 [[redirects]]
   from = "/*"
