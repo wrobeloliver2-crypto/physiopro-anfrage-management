@@ -846,13 +846,19 @@ function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, o
               </div>
             )}
           </div>
-          {anfrage.ergebnis && (
+          {(form.ergebnis || anfrage.ergebnis) && (
             <div className="feld">
               <label>Ergebnis</label>
               <div className="erg-anzeige">
-                <span className={'erg-chip'+(istTerminErgebnis(anfrage.ergebnis)?' erg-chip-termin':'')+(istAbsage(anfrage.ergebnis)?' erg-chip-absage':'')}>
-                  {istTerminErgebnis(anfrage.ergebnis) ? <CalendarCheck size={13} /> : istAbsage(anfrage.ergebnis) ? <CalendarX size={13} /> : <CheckCircle2 size={13} />} {anfrage.ergebnis}
+                <span className={'erg-chip'+(istTerminErgebnis(form.ergebnis ?? anfrage.ergebnis)?' erg-chip-termin':'')+(istAbsage(form.ergebnis ?? anfrage.ergebnis)?' erg-chip-absage':'')}>
+                  {istTerminErgebnis(form.ergebnis ?? anfrage.ergebnis) ? <CalendarCheck size={13} /> : istAbsage(form.ergebnis ?? anfrage.ergebnis) ? <CalendarX size={13} /> : <CheckCircle2 size={13} />} {form.ergebnis ?? anfrage.ergebnis}
                 </span>
+                {!isReadOnly && (
+                  <button type="button" className="erg-entfernen" title="Ergebnis entfernen"
+                    onClick={() => { set('ergebnis', ''); if (form.status === 'Erledigt') set('status', 'In Bearbeitung'); }}>
+                    <X size={13} /> entfernen
+                  </button>
+                )}
               </div>
             </div>
           )}

@@ -220,7 +220,9 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 .erg-hinweis { font-size:11px; color:var(--grau-hell); text-align:center; padding:0 0 12px; margin:-4px 0 0; }
 .speichern-btn:disabled { opacity:.45; cursor:not-allowed; }
 /* Ergebnis-Anzeige im Detail-Modal */
-.erg-anzeige { display:flex; }
+.erg-anzeige { display:flex; align-items:center; gap:10px; }
+.erg-entfernen { display:inline-flex; align-items:center; gap:4px; font-size:12px; background:none; border:none; color:#b0413a; cursor:pointer; padding:4px 6px; border-radius:6px; }
+.erg-entfernen:hover { background:#fbeae8; }
 .erg-chip { display:inline-flex; align-items:center; gap:5px; font-size:12px; background:var(--gruen-hell); color:var(--gruen-dunkel); padding:5px 11px; border-radius:8px; }
 .erg-chip-termin { background:var(--gruen-hell); color:var(--gruen-dunkel); font-weight:500; }
 /* Ergebnis-Chip im Mülleimer */
