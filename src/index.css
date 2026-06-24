@@ -165,6 +165,21 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 .modal-fuss-3 .zurueck-btn { margin-right:auto; }
 .zurueck-btn { display:inline-flex; align-items:center; gap:5px; background:none; color:var(--text-mid); border:none; font-family:var(--sans); font-size:13px; border-radius:100px; padding:9px 14px; cursor:pointer; }
 .zurueck-btn:hover { background:var(--beige-mid); }
+.zurueck-btn:disabled, .abbrechen-btn:disabled, .speichern-btn:disabled { opacity:.5; cursor:not-allowed; }
+
+/* ---- DraftModal: PDF-Upload ---- */
+.draft-pdf-feld { display:block; cursor:pointer; }
+.draft-pdf-box { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--gruen-dunkel); background:var(--gruen-hell); border:1px dashed #b9cdc0; border-radius:9px; padding:13px 15px; transition:.15s; }
+.draft-pdf-box:hover { border-color:var(--gruen); background:#e6efe9; }
+.draft-pdf-wechseln { margin-left:auto; font-size:11px; color:var(--grau); text-decoration:underline; }
+.draft-pdf-hinweis { font-size:11px; color:var(--grau-hell); margin:7px 2px 0; }
+.draft-fehler { font-size:12px; color:#b0413a; background:#fbeae8; border-radius:7px; padding:9px 12px; margin:14px 0 0; }
+
+/* ---- DraftModal: Erfolg ---- */
+.draft-ok { display:flex; flex-direction:column; align-items:center; text-align:center; gap:10px; padding:14px 6px 4px; color:var(--gruen); }
+.draft-ok-titel { font-size:15px; font-weight:600; color:var(--text); margin:4px 0 0; }
+.draft-ok-text { font-size:13px; line-height:1.55; color:var(--grau); margin:0; }
+.draft-ok-text strong { color:var(--gruen-dunkel); }
 .loeschen-btn { background:#fff; color:var(--rot); border:1px solid #f0c4bd; font-family:var(--sans); font-size:13px; border-radius:100px; padding:9px 16px; cursor:pointer; display:flex; align-items:center; gap:5px; }
 .loeschen-btn:hover { background:#fbeae8; }
 

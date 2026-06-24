@@ -393,7 +393,7 @@ export default function App() {
           <ErgebnisModal anfrage={ergebnisAnfrage} onClose={() => setErgebnisAnfrage(null)} onConfirm={cardErledigt} />
         )}
         {mailtoAnfrage && (
-          <MailtoModal anfrage={mailtoAnfrage.anfrage} ergebnis={mailtoAnfrage.ergebnis}
+          <DraftModal anfrage={mailtoAnfrage.anfrage} ergebnis={mailtoAnfrage.ergebnis}
             onClose={() => setMailtoAnfrage(null)}
             onBack={() => { setMailtoAnfrage(null); setSelectedAnfrage(mailtoAnfrage.anfrage); }} />
         )}
@@ -675,80 +675,123 @@ function WeiterleitenModal({ anfrage, onClose, onConfirm }) {
 
 // ====================================================================
 // ====================================================================
-// MailtoModal — E-Mail-Bestätigung nach Termin-Ergebnis
+// DraftModal — Outlook-Entwurf mit HTML-Mail + PDF-Anhang erstellen
 // ====================================================================
-function MailtoModal({ anfrage, ergebnis, onClose, onBack }) {
-  const betreff = encodeURIComponent('Ihre Anfrage bei PhysioPro Lübeck – Terminbestätigung');
+function DraftModal({ anfrage, ergebnis, onClose, onBack }) {
+  const [pdfDatei, setPdfDatei] = useState(null);   // { name, base64 }
+  const [status, setStatus] = useState('idle');     // idle | sende | ok | fehler
+  const [fehler, setFehler] = useState('');
 
   // Behandlungsart aus dem Ergebnis ableiten
   const behandlung = ergebnis.includes('Osteopathie') ? 'Osteopathie'
     : ergebnis.includes('Physiocoaching') ? 'Physiocoaching'
     : 'Physiotherapie';
 
-  const body = encodeURIComponent(
-`Liebe/r ${anfrage.name},
+  const onPdfWahl = (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    if (f.type !== 'application/pdf') { setFehler('Bitte eine PDF-Datei auswählen.'); return; }
+    if (f.size > 4 * 1024 * 1024) { setFehler('PDF ist größer als 4 MB.'); return; }
+    setFehler('');
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = String(reader.result).split(',')[1] || '';
+      setPdfDatei({ name: f.name, base64 });
+    };
+    reader.onerror = () => setFehler('PDF konnte nicht gelesen werden.');
+    reader.readAsDataURL(f);
+  };
 
-vielen Dank für Ihre Anfrage bei PhysioPro Lübeck.
+  const entwurfErstellen = async () => {
+    setStatus('sende'); setFehler('');
+    try {
+      const res = await fetch('/.netlify/functions/draft-create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: anfrage.name,
+          email: anfrage.email,
+          behandlung,
+          pdfBase64: pdfDatei ? pdfDatei.base64 : null,
+          pdfName: pdfDatei ? pdfDatei.name : null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || ('Fehler ' + res.status));
+      }
+      setStatus('ok');
+    } catch (e) {
+      setStatus('fehler');
+      setFehler(e.message || 'Entwurf konnte nicht erstellt werden.');
+    }
+  };
 
-Wir freuen uns, Ihnen mitteilen zu können, dass wir einen Termin für Sie im Bereich ${behandlung} vereinbaren konnten.
+  // Erfolgs-Ansicht
+  if (status === 'ok') {
+    return (
+      <div className="modal-overlay">
+        <div className="modal modal-schmal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-kopf modal-kopf-gruen">
+            <h2><Check size={17} style={{ verticalAlign:'-3px', marginRight:6 }} /> Entwurf erstellt</h2>
+          </div>
+          <div className="modal-body">
+            <div className="draft-ok">
+              <CheckCircle2 size={40} />
+              <p className="draft-ok-titel">Der Entwurf liegt in Outlook bereit</p>
+              <p className="draft-ok-text">
+                Öffne in Outlook das Postfach <strong>info@physioproluebeck.de</strong> →
+                Ordner <strong>Entwürfe</strong>. Dort kannst du die Mail an
+                <strong> {anfrage.name}</strong> prüfen{pdfDatei ? ' (PDF ist angehängt)' : ''} und senden.
+              </p>
+            </div>
+          </div>
+          <div className="modal-fuss">
+            <span />
+            <button className="speichern-btn" onClick={onClose}>Fertig</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-Im Anhang finden Sie Ihre Termindetails als PDF.
-
-Bei Fragen stehen wir Ihnen jederzeit gerne zur Verfügung.
-
-Mit freundlichen Grüßen
-Ihr PhysioPro-Team
-
-──────────────────────────────
-PhysioPro Lübeck
-Tel: 0451 – 400 430 70
-info@physioproluebeck.de
-www.physioproluebeck.de`
-  );
-
-  const mailtoLink = `mailto:${anfrage.email}?subject=${betreff}&body=${body}`;
-
+  const sendet = status === 'sende';
   return (
     <div className="modal-overlay">
       <div className="modal modal-schmal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-kopf modal-kopf-gruen">
-          <h2><Mail size={17} style={{ verticalAlign:'-3px', marginRight:6 }} /> Terminbestätigung senden?</h2>
+          <h2><Mail size={17} style={{ verticalAlign:'-3px', marginRight:6 }} /> Terminbestätigung als Outlook-Entwurf</h2>
         </div>
         <div className="modal-body">
           <p className="erg-name">{anfrage.name}</p>
-          <p style={{ fontSize: '0.875rem', color: 'var(--text-2)', marginBottom: '0.5rem' }}>
-            Eine vorausgefertigte E-Mail an
-          </p>
-          <p style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-1)', marginBottom: '1rem', wordBreak: 'break-all' }}>
+          <p style={{ fontSize:'0.875rem', color:'var(--grau)', margin:'0 0 4px' }}>HTML-E-Mail ({behandlung}) an</p>
+          <p style={{ fontSize:'0.9rem', fontWeight:600, color:'var(--text)', margin:'0 0 18px', wordBreak:'break-all' }}>
             {anfrage.email}
           </p>
-          <div style={{
-            background: 'var(--box-bg, #f4f7f5)',
-            border: '1px solid var(--box-rand, #dde8e0)',
-            borderRadius: 8,
-            padding: '0.75rem 1rem',
-            fontSize: '0.8rem',
-            color: 'var(--text-2)',
-            marginBottom: '0.5rem'
-          }}>
-            <strong style={{ display:'block', marginBottom: 4 }}>Vorbefüllt:</strong>
-            Betreff + Begrüßungstext für {behandlung}.<br />
-            Bitte <strong>PDF mit den Terminen anhängen</strong> bevor Sie absenden.
-          </div>
+
+          <label className="draft-pdf-feld">
+            <input type="file" accept="application/pdf" onChange={onPdfWahl} disabled={sendet} hidden />
+            <span className="draft-pdf-box">
+              {pdfDatei
+                ? <><FileText size={16} /> {pdfDatei.name} <span className="draft-pdf-wechseln">ändern</span></>
+                : <><Plus size={16} /> Termin-PDF auswählen</>}
+            </span>
+          </label>
+          <p className="draft-pdf-hinweis">
+            Optional. Das PDF wird automatisch an den Entwurf angehängt.
+          </p>
+
+          {fehler && <p className="draft-fehler">{fehler}</p>}
         </div>
         <div className="modal-fuss modal-fuss-3">
-          <button className="zurueck-btn" onClick={onBack}>
+          <button className="zurueck-btn" onClick={onBack} disabled={sendet}>
             <ArrowLeft size={15} /> Zurück
           </button>
-          <button className="abbrechen-btn" onClick={onClose}>Keine E-Mail</button>
-          <a
-            href={mailtoLink}
-            className="speichern-btn"
-            style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-            onClick={onClose}
-          >
-            <Mail size={15} /> E-Mail öffnen
-          </a>
+          <button className="abbrechen-btn" onClick={onClose} disabled={sendet}>Keine E-Mail</button>
+          <button className="speichern-btn" onClick={entwurfErstellen} disabled={sendet}
+            style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
+            {sendet ? <><Hourglass size={15} /> Erstelle…</> : <><Mail size={15} /> Entwurf erstellen</>}
+          </button>
         </div>
       </div>
     </div>
