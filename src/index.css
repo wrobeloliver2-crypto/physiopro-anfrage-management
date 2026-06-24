@@ -161,6 +161,10 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 .wl-btn:hover { background:#e7ddf2; }
 .abbrechen-btn { background:#fff; color:var(--text-mid); border:1px solid var(--beige-mid); font-family:var(--sans); font-size:13px; border-radius:100px; padding:9px 18px; cursor:pointer; }
 .abbrechen-btn:hover { border-color:var(--beige); }
+.modal-fuss-3 { justify-content:flex-end; }
+.modal-fuss-3 .zurueck-btn { margin-right:auto; }
+.zurueck-btn { display:inline-flex; align-items:center; gap:5px; background:none; color:var(--text-mid); border:none; font-family:var(--sans); font-size:13px; border-radius:100px; padding:9px 14px; cursor:pointer; }
+.zurueck-btn:hover { background:var(--beige-mid); }
 .loeschen-btn { background:#fff; color:var(--rot); border:1px solid #f0c4bd; font-family:var(--sans); font-size:13px; border-radius:100px; padding:9px 16px; cursor:pointer; display:flex; align-items:center; gap:5px; }
 .loeschen-btn:hover { background:#fbeae8; }
 

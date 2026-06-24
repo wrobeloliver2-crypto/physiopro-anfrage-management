@@ -393,7 +393,9 @@ export default function App() {
           <ErgebnisModal anfrage={ergebnisAnfrage} onClose={() => setErgebnisAnfrage(null)} onConfirm={cardErledigt} />
         )}
         {mailtoAnfrage && (
-          <MailtoModal anfrage={mailtoAnfrage.anfrage} ergebnis={mailtoAnfrage.ergebnis} onClose={() => setMailtoAnfrage(null)} />
+          <MailtoModal anfrage={mailtoAnfrage.anfrage} ergebnis={mailtoAnfrage.ergebnis}
+            onClose={() => setMailtoAnfrage(null)}
+            onBack={() => { setMailtoAnfrage(null); setSelectedAnfrage(mailtoAnfrage.anfrage); }} />
         )}
         {showNewForm && !isReadOnly && (
           <NeueAnfrageForm onClose={() => setShowNewForm(false)} onSubmit={addAnfrage} onMerge={mergeAnfrage} checkDuplicate={checkDuplicate} />
@@ -675,7 +677,7 @@ function WeiterleitenModal({ anfrage, onClose, onConfirm }) {
 // ====================================================================
 // MailtoModal — E-Mail-Bestätigung nach Termin-Ergebnis
 // ====================================================================
-function MailtoModal({ anfrage, ergebnis, onClose }) {
+function MailtoModal({ anfrage, ergebnis, onClose, onBack }) {
   const betreff = encodeURIComponent('Ihre Anfrage bei PhysioPro Lübeck – Terminbestätigung');
 
   // Behandlungsart aus dem Ergebnis ableiten
@@ -734,7 +736,10 @@ www.physioproluebeck.de`
             Bitte <strong>PDF mit den Terminen anhängen</strong> bevor Sie absenden.
           </div>
         </div>
-        <div className="modal-fuss">
+        <div className="modal-fuss modal-fuss-3">
+          <button className="zurueck-btn" onClick={onBack}>
+            <ArrowLeft size={15} /> Zurück
+          </button>
           <button className="abbrechen-btn" onClick={onClose}>Keine E-Mail</button>
           <a
             href={mailtoLink}
