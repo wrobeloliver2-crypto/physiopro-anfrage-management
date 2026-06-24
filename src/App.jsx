@@ -190,15 +190,10 @@ export default function App() {
         else if (s === 'Angeboten') s = 'In Bearbeitung';
         return { ...a, status: s, telefon: normalizeTelefon(a.telefon) };
       });
-      // Mülleimer-Aufräumung: Erledigte, deren Erledigt-Zeitpunkt > 14 Tage her ist,
-      // werden aus der Liste entfernt → fallen beim nächsten Speichern aus dem Sheet.
-      // Erledigte ohne erkennbaren Erledigt-Zeitstempel (Altdaten) bleiben erhalten.
-      const bereinigt = migriert.filter((a) => {
-        if (a.status !== 'Erledigt') return true;
-        const t = tageSeitErledigt(a);
-        return t === null || t < 14;
-      });
-      setAnfragen(bereinigt); setLetzteAenderung(new Date());
+      // Alle Daten bleiben erhalten (auch ältere Erledigte) → für spätere Auswertung.
+      // Die Begrenzung auf 14 Tage erfolgt NUR bei der Archiv-Anzeige, nicht beim
+      // Laden/Speichern. Damit fällt nichts mehr aus dem Sheet.
+      setAnfragen(migriert); setLetzteAenderung(new Date());
     } catch (e) {
       if (versuch < 2) { setTimeout(() => loadFromSheets(versuch+1), 3000); return; }
       setError(e.message || 'Verbindung fehlgeschlagen');
