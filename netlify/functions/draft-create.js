@@ -69,8 +69,7 @@ function buildHtml({ name, behandlung }) {
             vielen Dank für Ihre Anfrage bei PhysioPro Lübeck.
           </p>
           <p style="margin:0 0 22px;font-size:15px;line-height:1.6;color:${text};">
-            wir freuen uns, Ihnen mitteilen zu können, dass wir einen Termin für Sie
-            im Bereich <strong style="color:${gruen};">${behandlung}</strong> vereinbaren konnten.
+            wir freuen uns sehr, dass wir gemeinsam so schnell einen passenden Termin für Sie finden konnten.
           </p>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${gruenHell};border-radius:10px;margin:0 0 22px;">
             <tr><td style="padding:16px 20px;font-size:14px;line-height:1.55;color:${grau};">
