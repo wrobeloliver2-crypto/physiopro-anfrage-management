@@ -4,7 +4,7 @@ import {
   X, Trash2, Calendar, User, Globe, Check, RefreshCw, StickyNote,
   PhoneCall, Pin, ArrowRight, ArrowLeft, Send, Inbox, UserCheck,
   Search, FileText, PhoneOff, CalendarCheck, Hourglass, RotateCcw,
-  CheckCircle2, Frown, CalendarX, Megaphone,
+  CheckCircle2, Frown, CalendarX, Megaphone, Archive,
 } from 'lucide-react';
 
 // ====================================================================
@@ -364,7 +364,7 @@ export default function App() {
               <Inbox size={14} /> Aktiv
             </button>
             <button className={'ansicht-tab'+(ansicht==='muelleimer'?' aktiv':'')} onClick={() => setAnsicht('muelleimer')}>
-              <Trash2 size={14} /> Mülleimer{muelleimer.length ? ' ('+muelleimer.length+')' : ''}
+              <Archive size={14} /> Archiv{muelleimer.length ? ' ('+muelleimer.length+')' : ''}
             </button>
           </div>
           {loading && anfragen.length===0 ? (
@@ -566,16 +566,16 @@ function Muelleimer({ anfragen, isReadOnly, onCardClick, onZurueckholen }) {
   if (!anfragen.length) {
     return (
       <div className="muelleimer-leer">
-        <Trash2 size={28} />
-        <p>Keine erledigten Anfragen.</p>
-        <span>Erledigte Anfragen erscheinen hier 14 Tage lang und können zurückgeholt werden.</span>
+        <Archive size={28} />
+        <p>Noch keine abgeschlossenen Anfragen.</p>
+        <span>Abgeschlossene Anfragen werden hier archiviert und können zurückgeholt werden.</span>
       </div>
     );
   }
   return (
     <div className="muelleimer">
       <div className="muelleimer-hinweis">
-        <Trash2 size={13} /> Erledigt der letzten 14 Tage — danach automatisch entfernt.
+        <Archive size={13} /> Abgeschlossene Anfragen der letzten 14 Tage.
       </div>
       <div className="muelleimer-liste">
         {anfragen.map((a) => {
@@ -712,11 +712,10 @@ www.physioproluebeck.de`
   const mailtoLink = `mailto:${anfrage.email}?subject=${betreff}&body=${body}`;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay">
       <div className="modal modal-schmal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-kopf modal-kopf-gruen">
           <h2><Mail size={17} style={{ verticalAlign:'-3px', marginRight:6 }} /> Terminbestätigung senden?</h2>
-          <button onClick={onClose} aria-label="Schliessen"><X size={20} /></button>
         </div>
         <div className="modal-body">
           <p className="erg-name">{anfrage.name}</p>
@@ -741,7 +740,7 @@ www.physioproluebeck.de`
           </div>
         </div>
         <div className="modal-fuss">
-          <button className="abbrechen-btn" onClick={onClose}>Nein, danke</button>
+          <button className="abbrechen-btn" onClick={onClose}>Keine E-Mail</button>
           <a
             href={mailtoLink}
             className="speichern-btn"
