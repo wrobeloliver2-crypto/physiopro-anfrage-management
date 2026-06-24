@@ -109,15 +109,6 @@ exports.handler = async (event) => {
     });
   }
 
-  // TEMP DIAGNOSE — wird nach Test entfernt
-  if (event.httpMethod === 'GET' && event.queryStringParameters && event.queryStringParameters.debug === '1') {
-    return jsonResponse(200, {
-      sheet_id_preview: '...' + SHEET_ID.slice(-6),
-      context: process.env.CONTEXT || 'unbekannt',
-      branch: process.env.BRANCH || 'unbekannt',
-    });
-  }
-
   try {
     const sheets = getSheets();
     const tab = await ersterTabName(sheets, SHEET_ID);

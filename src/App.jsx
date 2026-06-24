@@ -10,8 +10,10 @@ import {
 // ====================================================================
 // Konfiguration
 // ====================================================================
-const BACKEND_BASE =
-  import.meta.env.VITE_BACKEND_BASE || 'https://leadmanagementphysiopro.netlify.app';
+// BACKEND_BASE leer = relativ zur eigenen Domain. Damit nutzt der develop-Deploy
+// automatisch seine eigene Function (Test-Sheet), der main-Deploy seine (Live-Sheet).
+// Nur als Override (z.B. lokale Entwicklung) kann VITE_BACKEND_BASE gesetzt werden.
+const BACKEND_BASE = import.meta.env.VITE_BACKEND_BASE || '';
 const API_URL = BACKEND_BASE + '/.netlify/functions/sheets-api';
 const NOTES_URL = BACKEND_BASE + '/.netlify/functions/notes-api';
 
