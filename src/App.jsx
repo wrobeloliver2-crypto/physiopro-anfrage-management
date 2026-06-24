@@ -159,6 +159,7 @@ export default function App() {
   const [selectedAnfrage, setSelectedAnfrage] = useState(null);
   const [weiterleitenAnfrage, setWeiterleitenAnfrage] = useState(null);
   const [ergebnisAnfrage, setErgebnisAnfrage] = useState(null);
+  const [mailtoAnfrage, setMailtoAnfrage] = useState(null); // { anfrage, ergebnis } für E-Mail-Modal
   const [error, setError] = useState(null);
   const [letzteAenderung, setLetzteAenderung] = useState(null);
   const [ansicht, setAnsicht] = useState('aktiv'); // 'aktiv' | 'muelleimer'
@@ -291,12 +292,17 @@ export default function App() {
       setErgebnisAnfrage(null); setSelectedAnfrage(null);
       return;
     }
+    const abgeschlosseneAnfrage = { ...anfrage, status: 'Erledigt', ergebnis };
     persist(anfragen.map((a) => a.id===anfrage.id ? {
       ...a, ...anfrage, status: 'Erledigt', ergebnis,
       bearbeiter: (anfrage.bearbeiter && anfrage.bearbeiter!=='Unzugewiesen') ? anfrage.bearbeiter : currentUser,
       history:[...(anfrage.history || a.history || []), historyEintrag('Status', currentUser, (anfrage.status||a.status)+' → Erledigt'), historyEintrag('Ergebnis', currentUser, ergebnis)]
     } : a));
     setErgebnisAnfrage(null); setSelectedAnfrage(null);
+    // E-Mail-Modal nur wenn: Termin-Ergebnis UND E-Mail-Adresse vorhanden
+    if (istTerminErgebnis(ergebnis) && anfrage.email && anfrage.email.trim()) {
+      setMailtoAnfrage({ anfrage: abgeschlosseneAnfrage, ergebnis });
+    }
   };
   const cardSetSchritt = (anfrage, schritt) => {
     persist(anfragen.map((a) => a.id===anfrage.id ? { ...a, schritt, history:[...a.history, historyEintrag('Schritt', currentUser, schritt)] } : a));
@@ -388,6 +394,9 @@ export default function App() {
         )}
         {ergebnisAnfrage && (
           <ErgebnisModal anfrage={ergebnisAnfrage} onClose={() => setErgebnisAnfrage(null)} onConfirm={cardErledigt} />
+        )}
+        {mailtoAnfrage && (
+          <MailtoModal anfrage={mailtoAnfrage.anfrage} ergebnis={mailtoAnfrage.ergebnis} onClose={() => setMailtoAnfrage(null)} />
         )}
         {showNewForm && !isReadOnly && (
           <NeueAnfrageForm onClose={() => setShowNewForm(false)} onSubmit={addAnfrage} onMerge={mergeAnfrage} checkDuplicate={checkDuplicate} />
@@ -659,6 +668,86 @@ function WeiterleitenModal({ anfrage, onClose, onConfirm }) {
             <button onClick={() => onConfirm(anfrage,'Hanna Wrobel')}><User size={16} /> Hanna Wrobel</button>
           </div>
           <p className="wl-hinweis">Die Anfrage verschwindet danach aus dem Board und wird automatisch per E-Mail zugestellt.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ====================================================================
+// ====================================================================
+// MailtoModal — E-Mail-Bestätigung nach Termin-Ergebnis
+// ====================================================================
+function MailtoModal({ anfrage, ergebnis, onClose }) {
+  const betreff = encodeURIComponent('Ihre Anfrage bei PhysioPro Lübeck – Terminbestätigung');
+
+  // Behandlungsart aus dem Ergebnis ableiten
+  const behandlung = ergebnis.includes('Osteopathie') ? 'Osteopathie'
+    : ergebnis.includes('Physiocoaching') ? 'Physiocoaching'
+    : 'Physiotherapie';
+
+  const body = encodeURIComponent(
+`Liebe/r ${anfrage.name},
+
+vielen Dank für Ihre Anfrage bei PhysioPro Lübeck.
+
+Wir freuen uns, Ihnen mitteilen zu können, dass wir einen Termin für Sie im Bereich ${behandlung} vereinbaren konnten.
+
+Im Anhang finden Sie Ihre Termindetails als PDF.
+
+Bei Fragen stehen wir Ihnen jederzeit gerne zur Verfügung.
+
+Mit freundlichen Grüßen
+Ihr PhysioPro-Team
+
+──────────────────────────────
+PhysioPro Lübeck
+Tel: 0451 – 400 430 70
+info@physioproluebeck.de
+www.physioproluebeck.de`
+  );
+
+  const mailtoLink = `mailto:${anfrage.email}?subject=${betreff}&body=${body}`;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal modal-schmal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-kopf modal-kopf-gruen">
+          <h2><Mail size={17} style={{ verticalAlign:'-3px', marginRight:6 }} /> Terminbestätigung senden?</h2>
+          <button onClick={onClose} aria-label="Schliessen"><X size={20} /></button>
+        </div>
+        <div className="modal-body">
+          <p className="erg-name">{anfrage.name}</p>
+          <p style={{ fontSize: '0.875rem', color: 'var(--text-2)', marginBottom: '0.5rem' }}>
+            Eine vorausgefertigte E-Mail an
+          </p>
+          <p style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-1)', marginBottom: '1rem', wordBreak: 'break-all' }}>
+            {anfrage.email}
+          </p>
+          <div style={{
+            background: 'var(--box-bg, #f4f7f5)',
+            border: '1px solid var(--box-rand, #dde8e0)',
+            borderRadius: 8,
+            padding: '0.75rem 1rem',
+            fontSize: '0.8rem',
+            color: 'var(--text-2)',
+            marginBottom: '0.5rem'
+          }}>
+            <strong style={{ display:'block', marginBottom: 4 }}>Vorbefüllt:</strong>
+            Betreff + Begrüßungstext für {behandlung}.<br />
+            Bitte <strong>PDF mit den Terminen anhängen</strong> bevor Sie absenden.
+          </div>
+        </div>
+        <div className="modal-fuss">
+          <button className="abbrechen-btn" onClick={onClose}>Nein, danke</button>
+          <a
+            href={mailtoLink}
+            className="speichern-btn"
+            style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            onClick={onClose}
+          >
+            <Mail size={15} /> E-Mail öffnen
+          </a>
         </div>
       </div>
     </div>
