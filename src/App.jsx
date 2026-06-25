@@ -859,14 +859,27 @@ function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, o
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-kopf">
-          <h2>{anfrage.name}</h2>
+          {isReadOnly ? <h2>{anfrage.name}</h2> : (
+            <div className="kopf-name-feld">
+              <label>Name</label>
+              <input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Name" />
+            </div>
+          )}
           <button onClick={onClose} aria-label="Schliessen"><X size={20} /></button>
         </div>
         <div className="modal-body">
           <div className="info-grid">
             <InfoCard icon={<Calendar size={14} />} label="Eingang" value={anfrage.eingangsdatum} />
             <InfoCard icon={<Phone size={14} />} label="Telefon" value={anfrage.telefon || '-'} />
-            <InfoCard icon={<Mail size={14} />} label="E-Mail" value={anfrage.email || '-'} />
+            {isReadOnly
+              ? <InfoCard icon={<Mail size={14} />} label="E-Mail" value={anfrage.email || '-'} />
+              : (
+                <div className="info-card info-card-edit">
+                  <span className="info-label"><Mail size={14} />E-Mail <span className="info-label-hint">— nachtragbar</span></span>
+                  <input className="info-edit-input" type="email" value={form.email || ''}
+                    onChange={(e) => set('email', e.target.value)} placeholder="z. B. name@web.de" />
+                </div>
+              )}
             <InfoCard icon={<Globe size={14} />} label="Quelle" value={anfrage.quelle} />
             {anfrage.utm_source && (
               <InfoCard icon={<Megaphone size={14} />} label="Werbekanal"
