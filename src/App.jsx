@@ -27,13 +27,12 @@ const ALLE_USER = ['Luca', 'Finn', 'Annika', 'Oliver Wrobel', 'Hanna Wrobel'];
 
 // Bearbeitungs-Schritte, getrennt nach aktiv (In Bearbeitung) / haengt (To Do)
 const SCHRITTE_AKTIV = ['Rückruf vereinbart', 'Prüfe Terminverfügbarkeit', 'Termin wird abgestimmt'];
-const SCHRITTE_HAENGT = ['Angerufen – niemand erreicht', 'Wartet auf Rezept/Unterlagen', 'Wartet auf Rückmeldung Patient', 'In Medifox storniert', 'Ausfallrechnung schreiben', 'Bestätigung senden', 'Entwurf fehlgeschlagen'];
+const SCHRITTE_HAENGT = ['Angerufen – niemand erreicht', 'Wartet auf Rezept/Unterlagen', 'Wartet auf Rückmeldung Patient', 'In Medifox storniert', 'Ausfallrechnung schreiben', 'Bestätigung senden'];
 
-// Schritte rund um die Terminbestätigung (Outlook-Entwurf). Beide halten die Karte
-// sichtbar in To Do, bis die Rezeption die Bestätigung tatsächlich versendet hat.
+// Schritt rund um die Terminbestätigung (Outlook-Entwurf). Hält die Karte sichtbar
+// in To Do, bis die Rezeption die Bestätigung tatsächlich versendet hat.
 const SCHRITT_BESTAETIGUNG = 'Bestätigung senden';
-const SCHRITT_ENTWURF_FEHLER = 'Entwurf fehlgeschlagen';
-const BESTAETIGUNG_SCHRITTE = [SCHRITT_BESTAETIGUNG, SCHRITT_ENTWURF_FEHLER];
+const BESTAETIGUNG_SCHRITTE = [SCHRITT_BESTAETIGUNG];
 
 // Ergebnis-Optionen (Pflicht beim Abschließen). Gruppiert für das Erledigt-Popup.
 const ERGEBNIS_GRUPPEN = [
@@ -113,6 +112,11 @@ function eingangsZeit(a) {
   if (!h) return '';
   const u = uhrzeit(h.zeitstempel);
   return u && u !== 'Invalid Date' ? u : '';
+}
+// Bestätigung gesendet? Aus History ableiten: die Karte lief durch die
+// "Bestätigung senden"-Schleife (Entwurf in Outlook erstellt). Kein neues Sheet-Feld.
+function bestaetigungGesendet(a) {
+  return (a.history || []).some((e) => e && e.aktion === 'Schritt' && typeof e.details === 'string' && e.details.includes('Entwurf in Outlook erstellt'));
 }
 // Zeitpunkt der Erledigung: letzter History-Eintrag, der den Status auf "Erledigt" gesetzt hat.
 function erledigtAm(a) {
@@ -325,15 +329,6 @@ export default function App() {
     } : a));
     setMailtoAnfrage(null); setSelectedAnfrage(null);
   };
-  // Fehler: Karte nach To Do mit Schritt „Entwurf fehlgeschlagen" (kein stiller Verlust).
-  // Wird im Hintergrund gesetzt; das Fehler-Modal bleibt offen für „Nochmal versuchen".
-  const draftFehler = (anfrage, ergebnis) => {
-    persist(anfragen.map((a) => a.id===anfrage.id ? {
-      ...a, ...anfrage, status: 'To Do', ergebnis, schritt: SCHRITT_ENTWURF_FEHLER,
-      bearbeiter: (anfrage.bearbeiter && anfrage.bearbeiter!=='Unzugewiesen') ? anfrage.bearbeiter : currentUser,
-      history:[...(anfrage.history || a.history || []), historyEintrag('Ergebnis', currentUser, ergebnis), historyEintrag('Schritt', currentUser, SCHRITT_ENTWURF_FEHLER)]
-    } : a));
-  };
   // „Keine E-Mail": Patient kriegt bewusst keine Bestätigung → direkt abschließen.
   const draftKeineEmail = (anfrage, ergebnis) => {
     persist(anfragen.map((a) => a.id===anfrage.id ? {
@@ -437,7 +432,6 @@ export default function App() {
         {mailtoAnfrage && (
           <DraftModal anfrage={mailtoAnfrage.anfrage} ergebnis={mailtoAnfrage.ergebnis}
             onErfolg={() => draftErfolg(mailtoAnfrage.anfrage, mailtoAnfrage.ergebnis)}
-            onFehler={() => draftFehler(mailtoAnfrage.anfrage, mailtoAnfrage.ergebnis)}
             onKeineEmail={() => draftKeineEmail(mailtoAnfrage.anfrage, mailtoAnfrage.ergebnis)}
             onClose={() => setMailtoAnfrage(null)}
             onBack={() => { setMailtoAnfrage(null); setSelectedAnfrage(mailtoAnfrage.anfrage); }} />
@@ -560,12 +554,6 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
           <span>Bestätigung offen – senden</span>
         </div>
       )}
-      {anfrage.schritt === SCHRITT_ENTWURF_FEHLER && (
-        <div className="karte-best-chip karte-best-fehler">
-          <AlertTriangle size={11} />
-          <span>Entwurf fehlgeschlagen</span>
-        </div>
-      )}
 
       {anfrage.utm_source && (
         <div className="karte-ads-chip">
@@ -647,6 +635,9 @@ function Muelleimer({ anfragen, isReadOnly, onCardClick, onZurueckholen }) {
                   <span className={'muell-ergebnis'+(istTerminErgebnis(a.ergebnis)?' muell-ergebnis-termin':'')+(istAbsage(a.ergebnis)?' muell-ergebnis-absage':'')}>
                     {istTerminErgebnis(a.ergebnis) ? <CalendarCheck size={11} /> : istAbsage(a.ergebnis) ? <CalendarX size={11} /> : <CheckCircle2 size={11} />} {a.ergebnis}
                   </span>
+                )}
+                {bestaetigungGesendet(a) && (
+                  <span className="muell-best-chip"><Mail size={11} /> Entwurf erstellt</span>
                 )}
                 <span className="muell-meta">
                   <Check size={11} /> erledigt {wann}
@@ -735,11 +726,10 @@ function WeiterleitenModal({ anfrage, onClose, onConfirm }) {
 // ====================================================================
 // DraftModal — Outlook-Entwurf mit HTML-Mail + PDF-Anhang erstellen
 // ====================================================================
-function DraftModal({ anfrage, ergebnis, onClose, onBack, onErfolg, onFehler, onKeineEmail }) {
+function DraftModal({ anfrage, ergebnis, onClose, onBack, onErfolg, onKeineEmail }) {
   const [pdfDatei, setPdfDatei] = useState(null);   // { name, base64 }
   const [status, setStatus] = useState('idle');     // idle | sende | ok | fehler
   const [fehler, setFehler] = useState('');
-  const [fehlerAbgelegt, setFehlerAbgelegt] = useState(false); // Karte bereits nach To Do gelegt?
 
   // Behandlungsart aus dem Ergebnis ableiten
   const behandlung = ergebnis.includes('Osteopathie') ? 'Osteopathie'
@@ -780,15 +770,10 @@ function DraftModal({ anfrage, ergebnis, onClose, onBack, onErfolg, onFehler, on
         throw new Error(data.error || ('Fehler ' + res.status));
       }
       setStatus('ok');
-      // Bei Erfolg nach einem vorherigen Fehlversuch wurde die Karte schon nach
-      // To Do gelegt — draftErfolg korrigiert den Schritt auf „Bestätigung senden".
       onErfolg && onErfolg();
     } catch (e) {
       setStatus('fehler');
       setFehler(e.message || 'Entwurf konnte nicht erstellt werden.');
-      // Kein stiller Verlust: Karte einmalig im Hintergrund nach To Do
-      // („Entwurf fehlgeschlagen"). Modal bleibt offen für „Nochmal versuchen".
-      if (!fehlerAbgelegt) { onFehler && onFehler(); setFehlerAbgelegt(true); }
     }
   };
 
@@ -851,13 +836,6 @@ function DraftModal({ anfrage, ergebnis, onClose, onBack, onErfolg, onFehler, on
           </p>
 
           {fehler && <p className="draft-fehler">{fehler}</p>}
-          {fehlerAbgelegt && status === 'fehler' && (
-            <p className="draft-fehler-hinweis">
-              Die Karte wurde nach <strong>To Do</strong> gelegt („Entwurf fehlgeschlagen"),
-              damit sie nicht verloren geht. Du kannst es hier nochmal versuchen oder das
-              Fenster schließen und später erneut probieren.
-            </p>
-          )}
         </div>
         <div className="modal-fuss modal-fuss-3">
           <button className="zurueck-btn" onClick={onBack} disabled={sendet}>
@@ -991,6 +969,9 @@ function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, o
                   </button>
                 )}
               </div>
+              {bestaetigungGesendet(anfrage) && (
+                <p className="erg-best-hinweis"><Mail size={12} /> Terminbestätigung wurde als Entwurf in Outlook erstellt</p>
+              )}
             </div>
           )}
           {(form.status==='In Bearbeitung' || form.status==='To Do') && !isReadOnly && (

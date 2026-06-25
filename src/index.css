@@ -260,6 +260,8 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 /* Terminabsage-Chip (bernstein, abgesetzt von Termin=grün) */
 .erg-chip-absage { background:var(--bernstein-hell); color:#fff; font-weight:500; }
 .muell-ergebnis-absage { background:#f7e9d6; color:var(--bernstein); font-weight:500; }
+.muell-best-chip { display:inline-flex; align-items:center; gap:4px; font-size:11px; background:#dff0e4; color:#2f6b43; font-weight:500; padding:3px 9px; border-radius:7px; width:fit-content; margin:2px 0; }
+.erg-best-hinweis { display:flex; align-items:center; gap:5px; font-size:12px; color:#2f6b43; margin:8px 0 0; }
 
 /* Google Ads Kanal-Chip auf der Karte */
 .karte-ads-chip { display:flex; align-items:center; gap:5px; font-size:11px; color:#1a5276; background:#d6eaf8; padding:4px 9px; border-radius:7px; margin-top:6px; line-height:1.4; }
@@ -268,6 +270,3 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 .karte-best-chip svg { flex-shrink:0; }
 .karte-best-offen { color:#2f6b43; background:#dff0e4; }
 .karte-best-offen svg { color:#2f6b43; }
-.karte-best-fehler { color:#a3302a; background:#f9e2e0; }
-.karte-best-fehler svg { color:#a3302a; }
-.draft-fehler-hinweis { font-size:12px; color:var(--bernstein); background:#fdf3e3; border-radius:7px; padding:9px 12px; margin:10px 0 0; line-height:1.5; }
