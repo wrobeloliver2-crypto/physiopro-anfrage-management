@@ -1,0 +1,77 @@
+// ====================================================================
+// Netlify Function: rueckruf-bestaetigung
+// Öffentlicher Endpunkt — wird vom Browser auf rueckruf-sms.html
+// aufgerufen, wenn der Patient den Rückruf-Link bestätigt.
+//
+// Kein API-Key nötig (Browser-seitig), aber Rate-Limit-freundlich:
+// Einfaches Weiterleiten an anfrage-create (server-to-server mit Key).
+// ====================================================================
+
+const FLOW_API_KEY = process.env.FLOW_API_KEY;
+// Im develop-Branch zeigt BACKEND_BASE auf die eigene develop-URL;
+// in Production leer lassen → relativer Aufruf funktioniert nicht
+// bei server-to-server, daher die feste URL aus ENV oder Fallback.
+const SITE_URL = process.env.SITE_URL || 'https://leadmanagementphysiopro.netlify.app';
+
+const jsonResponse = (statusCode, body) => ({
+  statusCode,
+  headers: {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  },
+  body: JSON.stringify(body),
+});
+
+exports.handler = async (event) => {
+  if (event.httpMethod === 'OPTIONS') return jsonResponse(200, { ok: true });
+  if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
+
+  if (!FLOW_API_KEY) return jsonResponse(500, { error: 'Server nicht konfiguriert' });
+
+  let payload;
+  try {
+    payload = JSON.parse(event.body || '{}');
+  } catch {
+    return jsonResponse(400, { error: 'Ungültiges JSON' });
+  }
+
+  const { telefon } = payload;
+  if (!telefon) return jsonResponse(400, { error: 'Telefonnummer fehlt' });
+
+  const anfrage = {
+    quelle: 'SMS-Rückrufwunsch',
+    telefon,
+    name: '',
+    anliegen: 'Rückrufwunsch (verpasster Anruf)',
+    prioritaet: 'Normal',
+    history: JSON.stringify([{
+      zeitstempel: new Date().toISOString(),
+      feld: 'Erstellt',
+      benutzer: 'SMS-Rückruf',
+      wert: 'Verpasster Anruf – Rückruf via SMS-Link bestätigt',
+    }]),
+  };
+
+  try {
+    const res = await fetch(`${SITE_URL}/.netlify/functions/anfrage-create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': FLOW_API_KEY,
+      },
+      body: JSON.stringify(anfrage),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+
+    return jsonResponse(200, { ok: true });
+  } catch (err) {
+    console.error('rueckruf-bestaetigung Fehler:', err.message);
+    return jsonResponse(500, { error: 'Anfrage konnte nicht gespeichert werden: ' + err.message });
+  }
+};
