@@ -27,7 +27,13 @@ const ALLE_USER = ['Luca', 'Finn', 'Annika', 'Oliver Wrobel', 'Hanna Wrobel'];
 
 // Bearbeitungs-Schritte, getrennt nach aktiv (In Bearbeitung) / haengt (To Do)
 const SCHRITTE_AKTIV = ['Rückruf vereinbart', 'Prüfe Terminverfügbarkeit', 'Termin wird abgestimmt'];
-const SCHRITTE_HAENGT = ['Angerufen – niemand erreicht', 'Wartet auf Rezept/Unterlagen', 'Wartet auf Rückmeldung Patient', 'In Medifox storniert', 'Ausfallrechnung schreiben'];
+const SCHRITTE_HAENGT = ['Angerufen – niemand erreicht', 'Wartet auf Rezept/Unterlagen', 'Wartet auf Rückmeldung Patient', 'In Medifox storniert', 'Ausfallrechnung schreiben', 'Bestätigung senden', 'Entwurf fehlgeschlagen'];
+
+// Schritte rund um die Terminbestätigung (Outlook-Entwurf). Beide halten die Karte
+// sichtbar in To Do, bis die Rezeption die Bestätigung tatsächlich versendet hat.
+const SCHRITT_BESTAETIGUNG = 'Bestätigung senden';
+const SCHRITT_ENTWURF_FEHLER = 'Entwurf fehlgeschlagen';
+const BESTAETIGUNG_SCHRITTE = [SCHRITT_BESTAETIGUNG, SCHRITT_ENTWURF_FEHLER];
 
 // Ergebnis-Optionen (Pflicht beim Abschließen). Gruppiert für das Erledigt-Popup.
 const ERGEBNIS_GRUPPEN = [
@@ -289,17 +295,53 @@ export default function App() {
       setErgebnisAnfrage(null); setSelectedAnfrage(null);
       return;
     }
-    const abgeschlosseneAnfrage = { ...anfrage, status: 'Erledigt', ergebnis };
+    // Sonderfall: Termin-Ergebnis MIT E-Mail → nicht direkt abschließen, sondern
+    // zuerst den Terminbestätigungs-Entwurf anbieten. Die Karte bleibt vorerst
+    // unverändert; erst die DraftModal-Aktion entscheidet, wohin sie geht
+    // (To Do „Bestätigung senden" bei Erfolg, direkt Erledigt bei „Keine E-Mail").
+    // Greift nur beim ERSTEN Mal: hängt die Karte schon in der Bestätigungs-Schleife,
+    // ist dieser Klick die Bestätigung „ist versendet" → normal abschließen.
+    const schonInBestaetigung = anfrage.status === 'To Do' && BESTAETIGUNG_SCHRITTE.includes(anfrage.schritt);
+    if (istTerminErgebnis(ergebnis) && anfrage.email && anfrage.email.trim() && !schonInBestaetigung) {
+      setErgebnisAnfrage(null); setSelectedAnfrage(null);
+      setMailtoAnfrage({ anfrage: { ...anfrage, ergebnis }, ergebnis });
+      return;
+    }
     persist(anfragen.map((a) => a.id===anfrage.id ? {
       ...a, ...anfrage, status: 'Erledigt', ergebnis,
       bearbeiter: (anfrage.bearbeiter && anfrage.bearbeiter!=='Unzugewiesen') ? anfrage.bearbeiter : currentUser,
       history:[...(anfrage.history || a.history || []), historyEintrag('Status', currentUser, (anfrage.status||a.status)+' → Erledigt'), historyEintrag('Ergebnis', currentUser, ergebnis)]
     } : a));
     setErgebnisAnfrage(null); setSelectedAnfrage(null);
-    // E-Mail-Modal nur wenn: Termin-Ergebnis UND E-Mail-Adresse vorhanden
-    if (istTerminErgebnis(ergebnis) && anfrage.email && anfrage.email.trim()) {
-      setMailtoAnfrage({ anfrage: abgeschlosseneAnfrage, ergebnis });
-    }
+  };
+
+  // Folgeaktionen aus dem DraftModal (Terminbestätigung)
+  // Erfolg: Karte nach To Do mit Schritt „Bestätigung senden" (sichtbar, bis versendet).
+  const draftErfolg = (anfrage, ergebnis) => {
+    persist(anfragen.map((a) => a.id===anfrage.id ? {
+      ...a, ...anfrage, status: 'To Do', ergebnis, schritt: SCHRITT_BESTAETIGUNG,
+      bearbeiter: (anfrage.bearbeiter && anfrage.bearbeiter!=='Unzugewiesen') ? anfrage.bearbeiter : currentUser,
+      history:[...(anfrage.history || a.history || []), historyEintrag('Ergebnis', currentUser, ergebnis), historyEintrag('Schritt', currentUser, SCHRITT_BESTAETIGUNG+' (Entwurf in Outlook erstellt)')]
+    } : a));
+    setMailtoAnfrage(null); setSelectedAnfrage(null);
+  };
+  // Fehler: Karte nach To Do mit Schritt „Entwurf fehlgeschlagen" (kein stiller Verlust).
+  // Wird im Hintergrund gesetzt; das Fehler-Modal bleibt offen für „Nochmal versuchen".
+  const draftFehler = (anfrage, ergebnis) => {
+    persist(anfragen.map((a) => a.id===anfrage.id ? {
+      ...a, ...anfrage, status: 'To Do', ergebnis, schritt: SCHRITT_ENTWURF_FEHLER,
+      bearbeiter: (anfrage.bearbeiter && anfrage.bearbeiter!=='Unzugewiesen') ? anfrage.bearbeiter : currentUser,
+      history:[...(anfrage.history || a.history || []), historyEintrag('Ergebnis', currentUser, ergebnis), historyEintrag('Schritt', currentUser, SCHRITT_ENTWURF_FEHLER)]
+    } : a));
+  };
+  // „Keine E-Mail": Patient kriegt bewusst keine Bestätigung → direkt abschließen.
+  const draftKeineEmail = (anfrage, ergebnis) => {
+    persist(anfragen.map((a) => a.id===anfrage.id ? {
+      ...a, ...anfrage, status: 'Erledigt', ergebnis,
+      bearbeiter: (anfrage.bearbeiter && anfrage.bearbeiter!=='Unzugewiesen') ? anfrage.bearbeiter : currentUser,
+      history:[...(anfrage.history || a.history || []), historyEintrag('Status', currentUser, (anfrage.status||a.status)+' → Erledigt'), historyEintrag('Ergebnis', currentUser, ergebnis), historyEintrag('Bestätigung', currentUser, 'keine E-Mail gewünscht')]
+    } : a));
+    setMailtoAnfrage(null); setSelectedAnfrage(null);
   };
   const cardSetSchritt = (anfrage, schritt) => {
     persist(anfragen.map((a) => a.id===anfrage.id ? { ...a, schritt, history:[...a.history, historyEintrag('Schritt', currentUser, schritt)] } : a));
@@ -394,6 +436,9 @@ export default function App() {
         )}
         {mailtoAnfrage && (
           <DraftModal anfrage={mailtoAnfrage.anfrage} ergebnis={mailtoAnfrage.ergebnis}
+            onErfolg={() => draftErfolg(mailtoAnfrage.anfrage, mailtoAnfrage.ergebnis)}
+            onFehler={() => draftFehler(mailtoAnfrage.anfrage, mailtoAnfrage.ergebnis)}
+            onKeineEmail={() => draftKeineEmail(mailtoAnfrage.anfrage, mailtoAnfrage.ergebnis)}
             onClose={() => setMailtoAnfrage(null)}
             onBack={() => { setMailtoAnfrage(null); setSelectedAnfrage(mailtoAnfrage.anfrage); }} />
         )}
@@ -508,6 +553,19 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
         <span className="karte-zeit"><Clock size={12} /> {eingangLabel(anfrage)}{eingangsZeit(anfrage) ? ' · ' + eingangsZeit(anfrage) : ''}</span>
         {anfrage.bearbeiter && anfrage.bearbeiter!=='Unzugewiesen' && <span className="karte-bearb"><User size={12} /> {anfrage.bearbeiter}</span>}
       </div>
+
+      {anfrage.schritt === SCHRITT_BESTAETIGUNG && (
+        <div className="karte-best-chip karte-best-offen">
+          <Mail size={11} />
+          <span>Bestätigung offen – senden</span>
+        </div>
+      )}
+      {anfrage.schritt === SCHRITT_ENTWURF_FEHLER && (
+        <div className="karte-best-chip karte-best-fehler">
+          <AlertTriangle size={11} />
+          <span>Entwurf fehlgeschlagen</span>
+        </div>
+      )}
 
       {anfrage.utm_source && (
         <div className="karte-ads-chip">
@@ -677,10 +735,11 @@ function WeiterleitenModal({ anfrage, onClose, onConfirm }) {
 // ====================================================================
 // DraftModal — Outlook-Entwurf mit HTML-Mail + PDF-Anhang erstellen
 // ====================================================================
-function DraftModal({ anfrage, ergebnis, onClose, onBack }) {
+function DraftModal({ anfrage, ergebnis, onClose, onBack, onErfolg, onFehler, onKeineEmail }) {
   const [pdfDatei, setPdfDatei] = useState(null);   // { name, base64 }
   const [status, setStatus] = useState('idle');     // idle | sende | ok | fehler
   const [fehler, setFehler] = useState('');
+  const [fehlerAbgelegt, setFehlerAbgelegt] = useState(false); // Karte bereits nach To Do gelegt?
 
   // Behandlungsart aus dem Ergebnis ableiten
   const behandlung = ergebnis.includes('Osteopathie') ? 'Osteopathie'
@@ -721,9 +780,15 @@ function DraftModal({ anfrage, ergebnis, onClose, onBack }) {
         throw new Error(data.error || ('Fehler ' + res.status));
       }
       setStatus('ok');
+      // Bei Erfolg nach einem vorherigen Fehlversuch wurde die Karte schon nach
+      // To Do gelegt — draftErfolg korrigiert den Schritt auf „Bestätigung senden".
+      onErfolg && onErfolg();
     } catch (e) {
       setStatus('fehler');
       setFehler(e.message || 'Entwurf konnte nicht erstellt werden.');
+      // Kein stiller Verlust: Karte einmalig im Hintergrund nach To Do
+      // („Entwurf fehlgeschlagen"). Modal bleibt offen für „Nochmal versuchen".
+      if (!fehlerAbgelegt) { onFehler && onFehler(); setFehlerAbgelegt(true); }
     }
   };
 
@@ -743,6 +808,10 @@ function DraftModal({ anfrage, ergebnis, onClose, onBack }) {
                 Öffne in Outlook das Postfach <strong>info@physioproluebeck.de</strong> →
                 Ordner <strong>Entwürfe</strong>. Dort kannst du die Mail an
                 <strong> {anfrage.name}</strong> prüfen{pdfDatei ? ' (PDF ist angehängt)' : ''} und senden.
+              </p>
+              <p className="draft-ok-text" style={{ marginTop:10 }}>
+                Die Karte bleibt so lange in <strong>To Do</strong> („Bestätigung senden"),
+                bis du sie nach dem Versenden auf <strong>Erledigt</strong> setzt.
               </p>
             </div>
           </div>
@@ -782,15 +851,22 @@ function DraftModal({ anfrage, ergebnis, onClose, onBack }) {
           </p>
 
           {fehler && <p className="draft-fehler">{fehler}</p>}
+          {fehlerAbgelegt && status === 'fehler' && (
+            <p className="draft-fehler-hinweis">
+              Die Karte wurde nach <strong>To Do</strong> gelegt („Entwurf fehlgeschlagen"),
+              damit sie nicht verloren geht. Du kannst es hier nochmal versuchen oder das
+              Fenster schließen und später erneut probieren.
+            </p>
+          )}
         </div>
         <div className="modal-fuss modal-fuss-3">
           <button className="zurueck-btn" onClick={onBack} disabled={sendet}>
             <ArrowLeft size={15} /> Zurück
           </button>
-          <button className="abbrechen-btn" onClick={onClose} disabled={sendet}>Keine E-Mail</button>
+          <button className="abbrechen-btn" onClick={onKeineEmail} disabled={sendet}>Keine E-Mail</button>
           <button className="speichern-btn" onClick={entwurfErstellen} disabled={sendet}
             style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
-            {sendet ? <><Hourglass size={15} /> Erstelle…</> : <><Mail size={15} /> Entwurf erstellen</>}
+            {sendet ? <><Hourglass size={15} /> Erstelle…</> : status === 'fehler' ? <><Mail size={15} /> Nochmal versuchen</> : <><Mail size={15} /> Entwurf erstellen</>}
           </button>
         </div>
       </div>
@@ -910,7 +986,7 @@ function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, o
                 </span>
                 {!isReadOnly && (
                   <button type="button" className="erg-entfernen" title="Ergebnis entfernen"
-                    onClick={() => { set('ergebnis', ''); if (form.status === 'Erledigt') set('status', 'In Bearbeitung'); }}>
+                    onClick={() => { set('ergebnis', ''); if (BESTAETIGUNG_SCHRITTE.includes(form.schritt ?? anfrage.schritt)) set('schritt', ''); if (form.status === 'Erledigt') set('status', 'In Bearbeitung'); }}>
                     <X size={13} /> entfernen
                   </button>
                 )}
