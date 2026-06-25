@@ -8,10 +8,6 @@
 // ====================================================================
 
 const FLOW_API_KEY = process.env.FLOW_API_KEY;
-// Im develop-Branch zeigt BACKEND_BASE auf die eigene develop-URL;
-// in Production leer lassen → relativer Aufruf funktioniert nicht
-// bei server-to-server, daher die feste URL aus ENV oder Fallback.
-const SITE_URL = process.env.SITE_URL || 'https://leadmanagementphysiopro.netlify.app';
 
 const jsonResponse = (statusCode, body) => ({
   statusCode,
@@ -55,7 +51,13 @@ exports.handler = async (event) => {
   };
 
   try {
-    const res = await fetch(`${SITE_URL}/.netlify/functions/anfrage-create`, {
+    // Eigenen Host aus dem Request ableiten → develop ruft develop,
+    // Production ruft Production (kein hartcodierter URL-Wert).
+    const proto = event.headers['x-forwarded-proto'] || 'https';
+    const host = event.headers.host;
+    const selfBase = `${proto}://${host}`;
+
+    const res = await fetch(`${selfBase}/.netlify/functions/anfrage-create`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
