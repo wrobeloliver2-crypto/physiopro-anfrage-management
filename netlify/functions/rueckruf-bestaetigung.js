@@ -39,8 +39,8 @@ exports.handler = async (event) => {
   const anfrage = {
     quelle: 'SMS-Rückrufwunsch',
     telefon,
-    name: '',
-    anliegen: 'Rückrufwunsch (verpasster Anruf)',
+    name: 'Verpasster Anruf',
+    anliegen: 'Bitte anrufen – Name & Anliegen erfragen',
     prioritaet: 'Normal',
     history: JSON.stringify([{
       zeitstempel: new Date().toISOString(),
