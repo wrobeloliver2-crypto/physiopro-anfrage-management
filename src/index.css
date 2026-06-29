@@ -243,6 +243,7 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 .erg-option { text-align:left; padding:9px 12px; border-radius:8px; border:1px solid var(--beige-mid); background:#fff; font-family:var(--sans); font-size:13px; color:var(--text); cursor:pointer; display:flex; align-items:center; gap:8px; transition:.12s; }
 .erg-option:hover { border-color:var(--beige); background:var(--creme); }
 .erg-option.aktiv { border:2px solid var(--gruen); background:var(--gruen-hell); color:var(--gruen-dunkel); font-weight:500; }
+.erg-neu-chip { margin-left:auto; font-size:10px; font-weight:600; letter-spacing:.03em; text-transform:uppercase; color:var(--gruen-dunkel); background:var(--gruen-hell); border:1px solid var(--gruen); padding:1px 7px; border-radius:9px; }
 .erg-primaer.aktiv { border-color:var(--gruen); }
 .erg-mehr { background:none; border:none; color:var(--grau); font-family:var(--sans); font-size:13px; cursor:pointer; padding:4px 0; }
 .erg-mehr:hover { color:var(--gruen); }

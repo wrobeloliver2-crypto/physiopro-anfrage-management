@@ -53,11 +53,15 @@ const ERGEBNIS_GRUPPEN = [
     'Weiterverwiesen an andere Praxis',
   ]},
   { titel: 'Sonstiges', optionen: [
+    'Frage zur Behandlung',
+    'Frage zu bestehendem Termin',
     'Doppelte Anfrage / bereits erfasst',
     'Testanfrage / intern',
   ]},
 ];
 const ALLE_ERGEBNISSE = ERGEBNIS_GRUPPEN.flatMap((g) => g.optionen);
+// Optionen, die im Popup einen "neu"-Chip bekommen. Zum Entfernen: Set leeren ( new Set() ).
+const NEUE_ERGEBNISSE = new Set(['Frage zur Behandlung', 'Frage zu bestehendem Termin']);
 const istTerminErgebnis = (e) => typeof e === 'string' && e.startsWith('Termin vereinbart');
 const istAbsage = (e) => typeof e === 'string' && e.startsWith('Terminabsage');
 // Diese Absage-Option schließt NICHT ab, sondern erzwingt erst "Ausfallrechnung schreiben" (To Do).
@@ -824,7 +828,8 @@ function ErgebnisModal({ anfrage, onClose, onConfirm }) {
                     className={'erg-option'+(auswahl===o?' aktiv':'')+(g.primaer?' erg-primaer':'')}
                     onClick={() => setAuswahl(o)}>
                     {istTerminErgebnis(o) ? <CalendarCheck size={14} /> : istAbsage(o) ? <CalendarX size={14} /> : g.titel.startsWith('Kein') ? <Frown size={14} /> : <FileText size={14} />}
-                    {o}
+                    <span>{o}</span>
+                    {NEUE_ERGEBNISSE.has(o) && <span className="erg-neu-chip">neu</span>}
                   </button>
                 ))}
               </div>
