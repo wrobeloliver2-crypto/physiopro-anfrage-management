@@ -76,6 +76,9 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 .karte-meta { display:flex; flex-wrap:wrap; gap:4px 12px; margin-top:8px; }
 .karte-tel { font-size:10px; color:var(--gruen); font-weight:500; display:flex; align-items:center; gap:4px; }
 .karte-zeit { font-size:10px; color:var(--grau-hell); display:flex; align-items:center; gap:4px; }
+.karte-frist-punkt { width:8px; height:8px; border-radius:50%; margin-left:2px; flex-shrink:0; }
+.karte-frist-gruen { background:#4a9d5b; }
+.karte-frist-rot { background:#d64545; }
 .karte-bearb { font-size:10px; color:var(--beige-dunkel); display:flex; align-items:center; gap:4px; }
 .karte-notiz { font-size:10px; color:var(--beige-dunkel); margin-top:6px; background:#faf6f0; border-radius:5px; padding:5px 8px; font-style:italic; display:flex; align-items:flex-start; gap:5px; }
 .karte-notiz.notiz-todo { color:var(--bernstein); background:#fdf3e3; font-style:normal; }
@@ -261,7 +264,13 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 /* Terminabsage-Chip (bernstein, abgesetzt von Termin=grün) */
 .erg-chip-absage { background:var(--bernstein-hell); color:#fff; font-weight:500; }
 .muell-ergebnis-absage { background:#f7e9d6; color:var(--bernstein); font-weight:500; }
+.muell-best-chip { display:inline-flex; align-items:center; gap:4px; font-size:11px; background:#dff0e4; color:#2f6b43; font-weight:500; padding:3px 9px; border-radius:7px; width:fit-content; margin:2px 0; }
+.erg-best-hinweis { display:flex; align-items:center; gap:5px; font-size:12px; color:#2f6b43; margin:8px 0 0; }
 
 /* Google Ads Kanal-Chip auf der Karte */
 .karte-ads-chip { display:flex; align-items:center; gap:5px; font-size:11px; color:#1a5276; background:#d6eaf8; padding:4px 9px; border-radius:7px; margin-top:6px; line-height:1.4; }
 .karte-ads-chip svg { flex-shrink:0; color:#1a5276; }
+.karte-best-chip { display:flex; align-items:center; gap:5px; font-size:11px; font-weight:600; padding:4px 9px; border-radius:7px; margin-top:6px; line-height:1.4; }
+.karte-best-chip svg { flex-shrink:0; }
+.karte-best-offen { color:#2f6b43; background:#dff0e4; }
+.karte-best-offen svg { color:#2f6b43; }
