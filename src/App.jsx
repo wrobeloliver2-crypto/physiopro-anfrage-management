@@ -379,8 +379,19 @@ export default function App() {
   const addNotiz = (text) => { if (!text.trim()) return; persistNotes([...notizen, { id:neueId(), text:text.trim(), autor:currentUser, zeit:jetztISO() }]); };
   const deleteNotiz = (id) => persistNotes(notizen.filter((n) => n.id!==id));
 
-  // Sichtbar im Board: alles ausser Erledigt + Weitergeleitet
-  const sichtbar = anfragen.filter((a) => !['Erledigt','Weitergeleitet'].includes(a.status));
+  // Sichtbar im Board: alles ausser Erledigt + Weitergeleitet.
+  // Nach Priorität sortiert (Sofort zuerst), innerhalb gleicher Priorität
+  // bleibt die ursprüngliche Reihenfolge erhalten (stabile Sortierung).
+  const PRIO_RANG = { Sofort: 0, Normal: 1, Niedrig: 2 };
+  const sichtbar = anfragen
+    .filter((a) => !['Erledigt','Weitergeleitet'].includes(a.status))
+    .map((a, i) => [a, i])
+    .sort(([a, ia], [b, ib]) => {
+      const ra = PRIO_RANG[a.prioritaet] ?? 1;
+      const rb = PRIO_RANG[b.prioritaet] ?? 1;
+      return ra !== rb ? ra - rb : ia - ib;
+    })
+    .map(([a]) => a);
   // Mülleimer: erledigte Anfragen der letzten 14 Tage (jüngste zuerst)
   const muelleimer = anfragen
     .filter((a) => a.status === 'Erledigt' && (tageSeitErledigt(a) === null || tageSeitErledigt(a) < 14))

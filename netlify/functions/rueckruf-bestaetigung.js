@@ -41,7 +41,7 @@ exports.handler = async (event) => {
     telefon,
     name: 'Verpasster Anruf',
     anliegen: 'Bitte anrufen – Name & Anliegen erfragen',
-    prioritaet: 'Normal',
+    prioritaet: 'Sofort',
     history: JSON.stringify([{
       zeitstempel: new Date().toISOString(),
       feld: 'Erstellt',
