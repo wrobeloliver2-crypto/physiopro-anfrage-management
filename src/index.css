@@ -76,6 +76,9 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 .karte-meta { display:flex; flex-wrap:wrap; gap:4px 12px; margin-top:8px; }
 .karte-tel { font-size:10px; color:var(--gruen); font-weight:500; display:flex; align-items:center; gap:4px; }
 .karte-zeit { font-size:10px; color:var(--grau-hell); display:flex; align-items:center; gap:4px; }
+.karte-frist-punkt { width:8px; height:8px; border-radius:50%; margin-left:2px; flex-shrink:0; }
+.karte-frist-gruen { background:#4a9d5b; }
+.karte-frist-rot { background:#d64545; }
 .karte-bearb { font-size:10px; color:var(--beige-dunkel); display:flex; align-items:center; gap:4px; }
 .karte-notiz { font-size:10px; color:var(--beige-dunkel); margin-top:6px; background:#faf6f0; border-radius:5px; padding:5px 8px; font-style:italic; display:flex; align-items:flex-start; gap:5px; }
 .karte-notiz.notiz-todo { color:var(--bernstein); background:#fdf3e3; font-style:normal; }

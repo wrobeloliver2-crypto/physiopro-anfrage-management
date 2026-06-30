@@ -107,11 +107,30 @@ function eingangLabel(a) {
 function historyEintrag(aktion, von, details) { return { zeitstempel: jetztISO(), aktion, von, details }; }
 // Eingangs-Uhrzeit: aus dem "Erstellt"-History-Eintrag ableiten (voller Zeitstempel).
 // Faellt sauber leer aus, wenn keine History/kein Zeitstempel vorhanden ist (Altdaten).
+// Voller Eingangs-Zeitstempel (Date) der Karte. Robust gegen beide History-
+// Schemata: Frontend schreibt {aktion:'Erstellt', details}, Flow #1 schreibt
+// {feld:'Erstellt', wert}. Fallback: erster History-Eintrag mit Zeitstempel.
+function eingangsTS(a) {
+  const hist = a.history || [];
+  const erstellt = hist.find((e) => e && (e.aktion === 'Erstellt' || e.feld === 'Erstellt') && e.zeitstempel);
+  const eintrag = erstellt || hist.find((e) => e && e.zeitstempel);
+  if (!eintrag) return null;
+  const d = new Date(eintrag.zeitstempel);
+  return isNaN(d.getTime()) ? null : d;
+}
 function eingangsZeit(a) {
-  const h = (a.history || []).find((e) => e && e.aktion === 'Erstellt' && e.zeitstempel);
-  if (!h) return '';
-  const u = uhrzeit(h.zeitstempel);
-  return u && u !== 'Invalid Date' ? u : '';
+  const d = eingangsTS(a);
+  return d ? uhrzeit(d.toISOString()) : '';
+}
+// Frist-Ampel auf der Karte (60-Minuten-Ziel ab Eingang):
+//   'gruen' = heute reingekommen, < 60 Min her
+//   'rot'   = heute reingekommen, >= 60 Min her
+//   null    = kein Eingangs-Zeitstempel (Altdaten) oder nicht von heute -> kein Punkt
+function fristStatus(a) {
+  if (a.eingangsdatum !== heute()) return null;
+  const d = eingangsTS(a);
+  if (!d) return null;
+  return (Date.now() - d.getTime()) >= 60 * 60 * 1000 ? 'rot' : 'gruen';
 }
 // Bestätigung gesendet? Aus History ableiten: die Karte lief durch die
 // "Bestätigung senden"-Schleife (Entwurf in Outlook erstellt). Kein neues Sheet-Feld.
@@ -544,7 +563,7 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
 
       <div className="karte-meta">
         {anfrage.telefon && <span className="karte-tel"><Phone size={12} /> {anfrage.telefon}</span>}
-        <span className="karte-zeit"><Clock size={12} /> {eingangLabel(anfrage)}{eingangsZeit(anfrage) ? ' · ' + eingangsZeit(anfrage) : ''}</span>
+        <span className="karte-zeit"><Clock size={12} /> {eingangLabel(anfrage)}{eingangsZeit(anfrage) ? ' · ' + eingangsZeit(anfrage) : ''}{fristStatus(anfrage) && <span className={'karte-frist-punkt karte-frist-' + fristStatus(anfrage)} title={fristStatus(anfrage) === 'rot' ? 'Über 60 Min seit Eingang' : 'Unter 60 Min seit Eingang'} />}</span>
         {anfrage.bearbeiter && anfrage.bearbeiter!=='Unzugewiesen' && <span className="karte-bearb"><User size={12} /> {anfrage.bearbeiter}</span>}
       </div>
 
