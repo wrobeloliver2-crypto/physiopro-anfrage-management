@@ -126,14 +126,34 @@ function eingangsZeit(a) {
   const d = eingangsTS(a);
   return d ? uhrzeit(d.toISOString()) : '';
 }
-// Frist-Ampel auf der Karte (60-Minuten-Ziel ab Eingang):
-//   'gruen' = heute reingekommen, < 60 Min her
-//   'rot'   = heute reingekommen, >= 60 Min her
-//   null    = kein Eingangs-Zeitstempel (Altdaten) oder nicht von heute -> kein Punkt
+// Zeitpunkt des letzten Statuswechsels (History-Eintrag aktion 'Status'),
+// oder null wenn es noch keinen gab.
+function letzterStatuswechselTS(a) {
+  const treffer = (a.history || []).filter((e) => e && e.aktion === 'Status' && e.zeitstempel);
+  if (!treffer.length) return null;
+  const d = new Date(treffer[treffer.length - 1].zeitstempel);
+  return isNaN(d.getTime()) ? null : d;
+}
+// Bezugszeitpunkt der Frist-Ampel: der spätere von Eingang und letztem
+// Statuswechsel. So startet die 60-Min-Uhr bei jeder Aktivität (z.B. Karte
+// nach „In Bearbeitung"/„To Do" geschoben) neu -> Punkt springt wieder auf grün.
+function fristAnkerTS(a) {
+  const eingang = eingangsTS(a);
+  const status = letzterStatuswechselTS(a);
+  if (!eingang) return status;
+  if (!status) return eingang;
+  return status.getTime() > eingang.getTime() ? status : eingang;
+}
+// Frist-Ampel auf der Karte (60-Minuten-Ziel ab letzter Aktivität):
+//   'gruen' = Anker heute, < 60 Min her
+//   'rot'   = Anker heute, >= 60 Min her
+//   null    = To Do (wartet bewusst, Überwachung via Follow-up) oder
+//             kein Zeitstempel (Altdaten) oder Anker nicht von heute -> kein Punkt
 function fristStatus(a) {
-  if (a.eingangsdatum !== heute()) return null;
-  const d = eingangsTS(a);
+  if (a.status === 'To Do') return null;
+  const d = fristAnkerTS(a);
   if (!d) return null;
+  if (d.toISOString().slice(0, 10) !== heute()) return null;
   return (Date.now() - d.getTime()) >= 60 * 60 * 1000 ? 'rot' : 'gruen';
 }
 // Bestätigung gesendet? Aus History ableiten: die Karte lief durch die
