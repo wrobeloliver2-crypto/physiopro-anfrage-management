@@ -64,7 +64,23 @@ function normalizeTelefon(roh) {
   return '+' + n;
 }
 
-// ---- Auth (Service Account) ----
+// ---- Schutz: eigene Praxisnummer ist NIE eine gültige Rückrufnummer ----
+// Hintergrund: Die Telefon-KI kann fälschlich die Praxisnummer als Rufnummer
+// des Anrufers übergeben (Halluzination aus der Wissensdatenbank). Eine solche
+// Nummer darf nicht als echte Patientennummer ins Sheet, sonst klingelt ein
+// Rückruf bei uns selbst. Vergleich auf die letzten 9 Ziffern (robust gegen
+// Schreibweisen 0451…, +4945…, 0049451…).
+const PRAXIS_NUMMERN = ['+4945140073073']; // Praxis Lübeck, normalisiert
+function ziffernKern(tel) {
+  const d = String(tel || '').replace(/[^0-9]/g, '');
+  return d.length > 9 ? d.slice(-9) : d;
+}
+function istPraxisnummer(tel) {
+  const k = ziffernKern(tel);
+  if (!k) return false;
+  return PRAXIS_NUMMERN.some((p) => ziffernKern(p) === k);
+}
+
 function getSheets() {
   const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT || '{}');
   const auth = new google.auth.GoogleAuth({
@@ -147,14 +163,35 @@ exports.handler = async (event) => {
     }]);
   }
 
+  // ---- Telefon prüfen: Praxisnummer abfangen (s.o.) ----
+  const telNormalisiert = normalizeTelefon(payload.telefon);
+  const telIstPraxis = istPraxisnummer(telNormalisiert);
+  const telFinal = telIstPraxis ? '' : telNormalisiert;
+
+  // Bei abgefangener Praxisnummer einen Protokoll-Eintrag in die History legen.
+  if (telIstPraxis) {
+    try {
+      const arr = JSON.parse(historyStr);
+      if (Array.isArray(arr)) {
+        arr.push({
+          zeitstempel: new Date().toISOString(),
+          feld: 'Telefon',
+          benutzer: 'System',
+          wert: 'Praxisnummer als Rückrufnummer übergeben – verworfen, bitte beim Patienten erfragen',
+        });
+        historyStr = JSON.stringify(arr);
+      }
+    } catch (e) { /* History bleibt unverändert, kein harter Fehler */ }
+  }
+
   const obj = {
     id: payload.id || ('mail-' + Date.now()),
     eingangsdatum: payload.eingangsdatum || new Date().toISOString().slice(0, 10),
     quelle: payload.quelle || 'Website',
     name: payload.name || '',
-    telefon: normalizeTelefon(payload.telefon),
+    telefon: telFinal,
     email: payload.email || '',
-    anliegen: payload.anliegen || '',
+    anliegen: (payload.anliegen || '') + (telIstPraxis ? ' ⚠️ Rückrufnummer fehlt (Praxisnummer übergeben – bitte beim Patienten erfragen)' : ''),
     prioritaet: payload.prioritaet || 'Normal',
     status: 'Offen',           // immer Offen bei Neuanlage
     bearbeiter: 'Unzugewiesen', // immer Unzugewiesen bei Neuanlage
