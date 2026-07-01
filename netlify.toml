@@ -8,6 +8,11 @@
 [functions]
   node_bundler = "esbuild"
 
+# Osteopathie-Termine: Erinnerungs-Cron, alle 30 Minuten.
+# Ruhezeiten (vor 8 / nach 20 Uhr) werden in der Function selbst abgefangen.
+[functions."osteo-send-reminders"]
+  schedule = "*/30 * * * *"
+
 # Testumgebung (develop-Branch)
 [context.develop]
   command = "npm run build"

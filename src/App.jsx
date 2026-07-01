@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Plus, Phone, Mail, Clock, AlertTriangle, ChevronDown, ChevronUp,
   X, Trash2, Calendar, User, Globe, Check, RefreshCw, StickyNote,
@@ -6,6 +6,7 @@ import {
   Search, FileText, PhoneOff, CalendarCheck, Hourglass, RotateCcw,
   CheckCircle2, Frown, CalendarX, Megaphone, Archive,
 } from 'lucide-react';
+import OsteoTermine from './OsteoTermine';
 
 // ====================================================================
 // Konfiguration
@@ -221,6 +222,15 @@ export default function App() {
 
   const isReadOnly = READ_ONLY_USERS.includes(currentUser);
 
+  // Race-Condition-Schutz: Solange ein Speichervorgang (saveToSheets) noch läuft,
+  // überschreibt ein zeitgleicher Auto-Refresh (loadFromSheets) NICHT den lokalen
+  // State – sonst kann eine gerade verschobene Karte kurzzeitig wieder im alten
+  // Status auftauchen, wenn der Refresh die noch nicht aktualisierte Sheet-Version
+  // lädt. Nach Abschluss des Speicherns wird automatisch nachgeladen, damit der
+  // Stand am Ende garantiert mit dem Server übereinstimmt.
+  const pendingSaves = useRef(0);
+  const refreshNachSave = useRef(false);
+
   useEffect(() => { loadFromSheets(); loadNotes(); /* eslint-disable-next-line */ }, []);
   useEffect(() => { localStorage.setItem('currentUser', currentUser); }, [currentUser]);
   useEffect(() => {
@@ -243,6 +253,11 @@ export default function App() {
         else if (s === 'Angeboten') s = 'In Bearbeitung';
         return { ...a, status: s, telefon: normalizeTelefon(a.telefon) };
       });
+      // Läuft gerade ein Speichervorgang (saveToSheets), ist diese Sheet-Version
+      // potenziell veraltet (enthält den lokalen Stand noch nicht) → NICHT
+      // überschreiben. Stattdessen einen Refresh direkt nach Abschluss des
+      // Speicherns anfordern, damit am Ende der echte Serverstand gezeigt wird.
+      if (pendingSaves.current > 0) { refreshNachSave.current = true; return; }
       // Alle Daten bleiben erhalten (auch ältere Erledigte) → für spätere Auswertung.
       // Die Begrenzung auf 14 Tage erfolgt NUR bei der Archiv-Anzeige, nicht beim
       // Laden/Speichern. Damit fällt nichts mehr aus dem Sheet.
@@ -263,12 +278,23 @@ export default function App() {
   }, []);
 
   const saveToSheets = useCallback(async (data) => {
+    pendingSaves.current += 1;
     try {
       const res = await fetch(API_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ anfragen: data }) });
       if (!res.ok) throw new Error('Speichern fehlgeschlagen');
       setLetzteAenderung(new Date());
     } catch { setError('Verbindung fehlgeschlagen - Aenderung evtl. nicht gespeichert'); }
-  }, []);
+    finally {
+      pendingSaves.current -= 1;
+      // War während dieses Speicherns ein Refresh angefordert (der übersprungen
+      // wurde, weil die Sheet-Version zu dem Zeitpunkt evtl. veraltet war), jetzt
+      // nachholen – aber nur, wenn wirklich kein weiterer Save mehr läuft.
+      if (pendingSaves.current === 0 && refreshNachSave.current) {
+        refreshNachSave.current = false;
+        loadFromSheets();
+      }
+    }
+  }, [loadFromSheets]);
   const persist = (data) => { setAnfragen(data); saveToSheets(data); };
 
   const saveNotes = useCallback(async (data) => {
@@ -535,20 +561,49 @@ function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeut
 // ====================================================================
 function StatusSpalte({ status, anfragen, isReadOnly, onCardClick, onMove, onSetSchritt, onWeiterleiten }) {
   const meta = SPALTEN_META[status];
-  const Icon = meta.icon;
+  const istTodoSpalte = status === 'To Do';
+  const [todoTab, setTodoTab] = useState(() => localStorage.getItem('todoSpalteTab') || 'todo');
+  const zeigtOsteo = istTodoSpalte && todoTab === 'osteo';
+
+  const wechsleTodoTab = (tab) => {
+    setTodoTab(tab);
+    try { localStorage.setItem('todoSpalteTab', tab); } catch {}
+  };
+
+  const zaehler = zeigtOsteo ? null : anfragen.length;
+  const Icon = zeigtOsteo ? Calendar : meta.icon;
+  const kopfFarbe = zeigtOsteo ? 'var(--osteo)' : meta.farbe;
+  const kopfTitel = zeigtOsteo ? 'Osteo-Termine' : status;
+
   return (
-    <section className="spalte-box" style={{ background: meta.box, borderColor: meta.rand }}>
-      <div className="spalte-kopf" style={{ background: meta.farbe }}>
-        <span className="spalte-titel"><Icon size={15} /> {status}</span>
-        <span className="spalte-zaehler" style={{ color: meta.farbe }}>{anfragen.length}</span>
+    <section className="spalte-box" style={{ background: zeigtOsteo ? 'var(--osteo-hell)' : meta.box, borderColor: zeigtOsteo ? '#c3dade' : meta.rand }}>
+      <div className="spalte-kopf" style={{ background: kopfFarbe }}>
+        <span className="spalte-titel"><Icon size={15} /> {kopfTitel}</span>
+        {zaehler !== null && <span className="spalte-zaehler" style={{ color: meta.farbe }}>{zaehler}</span>}
       </div>
-      <div className="spalte-karten">
-        {anfragen.map((a) => (
-          <AnfragenKarte key={a.id} anfrage={a} spalte={status} isReadOnly={isReadOnly}
-            onClick={() => onCardClick(a)} onMove={onMove} onSetSchritt={onSetSchritt} onWeiterleiten={onWeiterleiten} />
-        ))}
-        {anfragen.length===0 && <p className="spalte-leer">Keine Einträge</p>}
-      </div>
+
+      {istTodoSpalte && (
+        <div className="spalte-todo-tabs">
+          <button className={'spalte-todo-tab' + (todoTab === 'todo' ? ' aktiv' : '')} onClick={() => wechsleTodoTab('todo')}>
+            To Do
+          </button>
+          <button className={'spalte-todo-tab' + (todoTab === 'osteo' ? ' aktiv osteo-aktiv' : '')} onClick={() => wechsleTodoTab('osteo')}>
+            Osteo-Termine
+          </button>
+        </div>
+      )}
+
+      {zeigtOsteo ? (
+        <OsteoTermine isReadOnly={isReadOnly} />
+      ) : (
+        <div className="spalte-karten">
+          {anfragen.map((a) => (
+            <AnfragenKarte key={a.id} anfrage={a} spalte={status} isReadOnly={isReadOnly}
+              onClick={() => onCardClick(a)} onMove={onMove} onSetSchritt={onSetSchritt} onWeiterleiten={onWeiterleiten} />
+          ))}
+          {anfragen.length===0 && <p className="spalte-leer">Keine Einträge</p>}
+        </div>
+      )}
     </section>
   );
 }
