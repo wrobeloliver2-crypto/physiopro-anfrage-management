@@ -1,6 +1,6 @@
-const { sheetReadAll } = require('./_osteo-lib');
+import { sheetReadAll } from './_osteo-lib.js';
 
-exports.handler = async (event)=>{
+export const handler = async (event)=>{
   try{
     const all = await sheetReadAll();
     // Nur relevante Felder ans Frontend

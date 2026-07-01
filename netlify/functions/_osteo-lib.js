@@ -1,5 +1,5 @@
 // Gemeinsame Helfer für alle Functions
-const crypto = require('crypto');
+import crypto from 'crypto';
 
 // ---------- Google Sheets via Service Account ----------
 // Wir nutzen die REST-API mit JWT-Bearer (kein npm-Paket nötig außer für JWT-Signatur).
@@ -120,7 +120,7 @@ function berlinHour(utcMs){
   return +h;
 }
 
-module.exports = {
+export {
   sheetAppend, sheetReadAll, sheetUpdateCell,
   HEADERS, COL,
   berlinLocalToUtcMs, berlinHour

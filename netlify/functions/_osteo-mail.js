@@ -210,4 +210,4 @@ function cancellationHtml(a, lateNotice){
   return mailShell('Terminabsage', inner);
 }
 
-module.exports = { sendMail, confirmationHtml, reminder3dHtml, reminder24hHtml, cancellationHtml };
+export { sendMail, confirmationHtml, reminder3dHtml, reminder24hHtml, cancellationHtml };

@@ -1,5 +1,5 @@
-const { sheetReadAll, sheetUpdateCell, COL, berlinLocalToUtcMs, berlinHour } = require('./_osteo-lib');
-const { sendMail, reminder3dHtml, reminder24hHtml } = require('./_osteo-mail');
+import { sheetReadAll, sheetUpdateCell, COL, berlinLocalToUtcMs, berlinHour } from './_osteo-lib.js';
+import { sendMail, reminder3dHtml, reminder24hHtml } from './_osteo-mail.js';
 
 // Läuft per Cron (Konfiguration in netlify.toml). Empfehlung: alle 30–60 Min.
 // Idempotent: Status-Flags im Sheet verhindern Doppelversand.
@@ -16,7 +16,7 @@ const { sendMail, reminder3dHtml, reminder24hHtml } = require('./_osteo-mail');
 const THRESHOLD_3D = 72;  // Stunden
 const THRESHOLD_24H = 24; // Stunden
 
-exports.handler = async ()=>{
+export const handler = async ()=>{
   const now = Date.now();
   const results = { checked:0, sent3d:0, sent24h:0, errors:[] };
 

@@ -1,10 +1,10 @@
-const { sheetReadAll, sheetUpdateCell, COL, berlinLocalToUtcMs } = require('./_osteo-lib');
-const { sendMail, cancellationHtml } = require('./_osteo-mail');
+import { sheetReadAll, sheetUpdateCell, COL, berlinLocalToUtcMs } from './_osteo-lib.js';
+import { sendMail, cancellationHtml } from './_osteo-mail.js';
 
 // Sagt einen Termin ab: bestimmt anhand der Berliner Zeit, ob rechtzeitig (>=24h,
 // kostenfrei) oder kurzfristig (<24h, Ausfallhonorar-Pruefung), schickt die passende
 // Absage-Mail und markiert den Termin im Sheet als storniert (loescht ihn nicht).
-exports.handler = async (event)=>{
+export const handler = async (event)=>{
   if(event.httpMethod!=='POST') return resp(405,{error:'Method not allowed'});
 
   try{

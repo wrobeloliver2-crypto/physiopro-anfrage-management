@@ -1,8 +1,8 @@
-const { sheetAppend, sheetUpdateCell, COL } = require('./_osteo-lib');
-const { sendMail, confirmationHtml } = require('./_osteo-mail');
-const crypto = require('crypto');
+import { sheetAppend, sheetUpdateCell, sheetReadAll, COL } from './_osteo-lib.js';
+import { sendMail, confirmationHtml } from './_osteo-mail.js';
+import crypto from 'crypto';
 
-exports.handler = async (event)=>{
+export const handler = async (event)=>{
   if(event.httpMethod!=='POST') return resp(405,{error:'Method not allowed'});
 
   try{
@@ -46,7 +46,6 @@ exports.handler = async (event)=>{
       try{
         // letzte Zeile finden über erneutes Lesen wäre teuer; wir nehmen append-Antwort nicht,
         // daher markieren wir beim nächsten List-Aufruf nicht nötig. Wir setzen hier per Suche.
-        const { sheetReadAll } = require('./_osteo-lib');
         const all = await sheetReadAll();
         const mine = all.find(r=>r.id===id);
         if(mine) await sheetUpdateCell(mine._rowIndex, COL.confirmSent, '1');
