@@ -274,3 +274,88 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 .karte-best-chip svg { flex-shrink:0; }
 .karte-best-offen { color:#2f6b43; background:#dff0e4; }
 .karte-best-offen svg { color:#2f6b43; }
+
+/* ════════════════════════════════════════════════
+   Osteopathie-Termine (Tab in der To-Do-Spalte)
+   ════════════════════════════════════════════════ */
+.spalte-todo-tabs { display:flex; gap:6px; padding:0 13px 10px; }
+.spalte-todo-tab { flex:1; font-family:var(--sans); font-size:11px; font-weight:500; color:var(--grau); background:#fff; border:1px solid var(--beige-mid); border-radius:100px; padding:6px 10px; cursor:pointer; transition:.15s; text-align:center; }
+.spalte-todo-tab:hover { color:var(--gruen-dunkel); border-color:var(--beige); }
+.spalte-todo-tab.aktiv { background:var(--bernstein); color:#fff; border-color:var(--bernstein); }
+
+.osteo-wrap { padding:0 13px 13px; }
+.osteo-tiles { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; }
+.osteo-tile { background:#fff; border:1px solid var(--beige-mid); border-radius:10px; padding:9px 8px; text-align:center; }
+.osteo-tile-n { font-size:19px; font-weight:700; color:var(--bernstein); line-height:1.2; }
+.osteo-tile-l { font-size:10px; color:var(--grau-hell); margin-top:1px; }
+
+.osteo-innertabs { display:flex; gap:6px; margin-bottom:10px; }
+.osteo-innertab { flex:1; font-family:var(--sans); font-size:12px; font-weight:500; color:var(--grau); background:#fff; border:1px solid var(--beige-mid); border-radius:8px; padding:7px; cursor:pointer; transition:.15s; }
+.osteo-innertab:hover { color:var(--gruen-dunkel); border-color:var(--beige); }
+.osteo-innertab.aktiv { background:var(--gruen); color:#fff; border-color:var(--gruen); }
+
+.osteo-card { background:#fff; border:1px solid var(--beige-mid); border-radius:10px; padding:13px; }
+.osteo-card-h { font-size:13px; font-weight:600; color:var(--gruen-dunkel); margin-bottom:10px; }
+.osteo-empty { text-align:center; color:var(--grau-hell); font-size:12px; padding:24px 0; }
+
+.osteo-label { display:block; font-size:11px; font-weight:600; color:var(--gruen-dunkel); margin:0 0 4px; }
+.osteo-hint { font-size:10px; color:var(--grau-hell); font-weight:400; }
+.osteo-input { width:100%; padding:9px 10px; border:1px solid var(--beige-mid); border-radius:8px; font-size:13px; font-family:var(--sans); background:var(--creme); color:var(--text); margin-bottom:10px; }
+.osteo-input:focus { outline:2px solid var(--gruen); outline-offset:-1px; background:#fff; }
+.osteo-row { display:grid; grid-template-columns:1fr 1fr; gap:0 10px; }
+.osteo-phone-row { display:grid; grid-template-columns:64px 1fr; gap:0 8px; }
+
+.osteo-typesel { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:4px; }
+.osteo-typebtn { display:flex; flex-direction:column; align-items:flex-start; gap:2px; padding:10px 11px; border:1.5px solid var(--beige-mid); border-radius:9px; background:#fff; cursor:pointer; text-align:left; font-family:var(--sans); transition:all .12s; }
+.osteo-typebtn:hover { border-color:var(--beige); background:var(--creme); }
+.osteo-typebtn.aktiv { border-color:var(--gruen); background:var(--gruen-hell); }
+.osteo-tb-title { font-size:12px; font-weight:600; color:var(--gruen-dunkel); display:block; }
+.osteo-tb-sub { font-size:10px; color:var(--grau-hell); }
+.osteo-typebtn.aktiv .osteo-tb-sub { color:var(--gruen-dunkel); }
+
+.osteo-patsearch { position:relative; margin-bottom:12px; }
+.osteo-pat-results { position:absolute; left:0; right:0; top:calc(100% + 4px); z-index:20; background:#fff; border:1px solid var(--beige); border-radius:9px; box-shadow:0 8px 24px rgba(0,0,0,.12); max-height:220px; overflow-y:auto; display:none; }
+.osteo-pat-results.show { display:block; }
+.osteo-pat-item { padding:9px 11px; cursor:pointer; border-bottom:1px solid var(--beige-warm); }
+.osteo-pat-item:last-child { border-bottom:none; }
+.osteo-pat-item:hover { background:var(--creme); }
+.osteo-pi-name { font-weight:600; color:var(--gruen-dunkel); font-size:12px; }
+.osteo-pi-sub { font-size:10px; color:var(--grau-hell); margin-top:1px; }
+.osteo-pat-empty { padding:10px 11px; font-size:11px; color:var(--grau-hell); }
+
+.osteo-msg { padding:9px 11px; border-radius:8px; font-size:12px; margin-bottom:10px; }
+.osteo-msg-ok { background:var(--gruen-hell); color:var(--gruen-dunkel); border:1px solid #cbddd0; }
+.osteo-msg-err { background:#fbeae8; color:#a3473e; border:1px solid #f0c4bd; }
+
+.osteo-list { display:flex; flex-direction:column; gap:8px; }
+.osteo-appt { border:1px solid var(--beige-mid); border-radius:9px; padding:11px 12px; background:#fff; }
+.osteo-appt-top { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+.osteo-appt-name { font-weight:600; color:var(--gruen-dunkel); font-size:12px; }
+.osteo-appt-when { font-size:11px; color:var(--grau-hell); }
+.osteo-appt-meta { font-size:11px; color:var(--grau); margin-top:3px; }
+.osteo-badges { display:flex; gap:5px; margin-top:7px; flex-wrap:wrap; }
+.osteo-badge { font-size:9px; padding:2px 7px; border-radius:20px; font-weight:600; border:1px solid var(--beige-mid); background:var(--beige-warm); color:var(--grau); }
+.osteo-badge.done { background:var(--gruen-hell); color:var(--gruen-dunkel); border-color:#cbddd0; }
+.osteo-appt-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:9px; }
+
+.osteo-ghost-btn { background:#fff; color:var(--gruen-dunkel); border:1px solid var(--beige-mid); border-radius:7px; padding:6px 10px; font-size:11px; font-weight:600; cursor:pointer; font-family:var(--sans); }
+.osteo-ghost-btn:hover { background:var(--creme); }
+.osteo-fee-hint { font-size:10px; }
+.osteo-primary-btn { background:var(--gruen); color:#fff; border:none; border-radius:8px; padding:10px 14px; font-size:12px; font-weight:600; cursor:pointer; font-family:var(--sans); transition:background .15s; }
+.osteo-primary-btn:hover { background:var(--gruen-dunkel); }
+.osteo-primary-btn:disabled { opacity:.5; cursor:not-allowed; }
+.osteo-primary-btn.osteo-danger { background:var(--rot); }
+.osteo-primary-btn.osteo-danger:hover { background:#a3271c; }
+
+.osteo-overlay { position:fixed; inset:0; background:rgba(43,43,40,.35); display:flex; align-items:center; justify-content:center; z-index:1000; padding:16px; }
+.osteo-confirm-card { background:#fff; border-radius:14px; padding:20px; max-width:360px; width:100%; box-shadow:0 12px 40px rgba(63,86,72,.25); }
+.osteo-confirm-card h3 { font-size:15px; color:var(--gruen-dunkel); margin-bottom:8px; }
+.osteo-confirm-card p { font-size:12px; color:var(--text-mid); margin-bottom:8px; line-height:1.4; }
+.osteo-confirm-note { font-size:11px; padding:9px 10px; border-radius:8px; }
+.osteo-confirm-note.ok { background:var(--gruen-hell); color:var(--gruen-dunkel); }
+.osteo-confirm-note.warn { background:#fbf2e3; color:var(--bernstein); }
+.osteo-confirm-actions { display:flex; gap:8px; margin-top:14px; }
+.osteo-confirm-actions button { flex:1; }
+
+.osteo-toast { position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:var(--gruen-dunkel); color:#fff; padding:10px 18px; border-radius:100px; font-size:12px; font-weight:500; box-shadow:0 6px 20px rgba(0,0,0,.2); z-index:1100; }
+

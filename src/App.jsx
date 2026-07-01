@@ -6,6 +6,7 @@ import {
   Search, FileText, PhoneOff, CalendarCheck, Hourglass, RotateCcw,
   CheckCircle2, Frown, CalendarX, Megaphone, Archive,
 } from 'lucide-react';
+import OsteoTermine from './OsteoTermine';
 
 // ====================================================================
 // Konfiguration
@@ -536,19 +537,45 @@ function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeut
 function StatusSpalte({ status, anfragen, isReadOnly, onCardClick, onMove, onSetSchritt, onWeiterleiten }) {
   const meta = SPALTEN_META[status];
   const Icon = meta.icon;
+  const istTodoSpalte = status === 'To Do';
+  const [todoTab, setTodoTab] = useState(() => localStorage.getItem('todoSpalteTab') || 'todo');
+
+  const wechsleTodoTab = (tab) => {
+    setTodoTab(tab);
+    try { localStorage.setItem('todoSpalteTab', tab); } catch {}
+  };
+
+  const zaehler = istTodoSpalte && todoTab === 'osteo' ? null : anfragen.length;
+
   return (
     <section className="spalte-box" style={{ background: meta.box, borderColor: meta.rand }}>
       <div className="spalte-kopf" style={{ background: meta.farbe }}>
         <span className="spalte-titel"><Icon size={15} /> {status}</span>
-        <span className="spalte-zaehler" style={{ color: meta.farbe }}>{anfragen.length}</span>
+        {zaehler !== null && <span className="spalte-zaehler" style={{ color: meta.farbe }}>{zaehler}</span>}
       </div>
-      <div className="spalte-karten">
-        {anfragen.map((a) => (
-          <AnfragenKarte key={a.id} anfrage={a} spalte={status} isReadOnly={isReadOnly}
-            onClick={() => onCardClick(a)} onMove={onMove} onSetSchritt={onSetSchritt} onWeiterleiten={onWeiterleiten} />
-        ))}
-        {anfragen.length===0 && <p className="spalte-leer">Keine Einträge</p>}
-      </div>
+
+      {istTodoSpalte && (
+        <div className="spalte-todo-tabs">
+          <button className={'spalte-todo-tab' + (todoTab === 'todo' ? ' aktiv' : '')} onClick={() => wechsleTodoTab('todo')}>
+            To Do
+          </button>
+          <button className={'spalte-todo-tab' + (todoTab === 'osteo' ? ' aktiv' : '')} onClick={() => wechsleTodoTab('osteo')}>
+            Osteo-Termine
+          </button>
+        </div>
+      )}
+
+      {istTodoSpalte && todoTab === 'osteo' ? (
+        <OsteoTermine isReadOnly={isReadOnly} />
+      ) : (
+        <div className="spalte-karten">
+          {anfragen.map((a) => (
+            <AnfragenKarte key={a.id} anfrage={a} spalte={status} isReadOnly={isReadOnly}
+              onClick={() => onCardClick(a)} onMove={onMove} onSetSchritt={onSetSchritt} onWeiterleiten={onWeiterleiten} />
+          ))}
+          {anfragen.length===0 && <p className="spalte-leer">Keine Einträge</p>}
+        </div>
+      )}
     </section>
   );
 }
