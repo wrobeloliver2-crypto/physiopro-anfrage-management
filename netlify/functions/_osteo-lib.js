@@ -3,9 +3,30 @@ import crypto from 'crypto';
 
 // ---------- Google Sheets via Service Account ----------
 // Wir nutzen die REST-API mit JWT-Bearer (kein npm-Paket nötig außer für JWT-Signatur).
+//
+// Credentials: Primär aus dem gemeinsamen GOOGLE_SERVICE_ACCOUNT-JSON (den auch
+// das Dashboard nutzt) - so brauchen wir keine eigenen OSTEO_GOOGLE_CLIENT_EMAIL /
+// OSTEO_GOOGLE_PRIVATE_KEY mehr (spart ~1,7 KB am 4-KB-Lambda-ENV-Limit).
+// Voraussetzung: Dieser Service-Account ist als Mitbearbeiter im Osteo-Sheet
+// freigegeben. Fallback auf die alten OSTEO_*-Variablen, falls gesetzt.
+function getServiceCredentials(){
+  const blob = process.env.GOOGLE_SERVICE_ACCOUNT;
+  if(blob){
+    try{
+      const j = JSON.parse(blob);
+      if(j.client_email && j.private_key){
+        return { email: j.client_email, key: j.private_key.replace(/\\n/g,'\n') };
+      }
+    }catch(e){ /* fällt unten auf OSTEO_*-Variablen zurück */ }
+  }
+  return {
+    email: process.env.OSTEO_GOOGLE_CLIENT_EMAIL,
+    key: (process.env.OSTEO_GOOGLE_PRIVATE_KEY||'').replace(/\\n/g,'\n'),
+  };
+}
+
 async function getGoogleAccessToken(){
-  const email = process.env.OSTEO_GOOGLE_CLIENT_EMAIL;
-  const key = (process.env.OSTEO_GOOGLE_PRIVATE_KEY||'').replace(/\\n/g,'\n');
+  const { email, key } = getServiceCredentials();
   const now = Math.floor(Date.now()/1000);
   const header = b64url(JSON.stringify({alg:'RS256',typ:'JWT'}));
   const claim = b64url(JSON.stringify({
