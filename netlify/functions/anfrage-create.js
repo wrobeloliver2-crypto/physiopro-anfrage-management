@@ -147,6 +147,28 @@ exports.handler = async (event) => {
     });
   }
 
+  // ---- Guard: HTML-/Müll-Payloads verwerfen (keine Karte anlegen) ----
+  // Hintergrund: Gelegentlich landet statt sauberem Formulartext roher
+  // HTML-Quelltext im Mail-Body (Auto-Antwort, Bounce, fremdes Mailformat).
+  // Der Flow-Parser schreibt dann z.B. "<html lang=\"en\"><head>" in Name/
+  // Anliegen. Solche Payloads werden hier verworfen, BEVOR eine Zeile
+  // entsteht. Rückgabe 200 (nicht 4xx), damit Flow #1 die Function als
+  // "erledigt" sieht und NICHT in Retry/429 läuft.
+  const HTML_MARKER = /<\s*(html|head|meta|body|!doctype|div|span|style|script|table|title|link)\b/i;
+  const nameRoh     = String(payload.name || '').trim();
+  const anliegenRoh = String(payload.anliegen || '').trim();
+  const istMuell =
+    HTML_MARKER.test(nameRoh) ||
+    HTML_MARKER.test(anliegenRoh) ||
+    nameRoh.startsWith('<') ||
+    anliegenRoh.startsWith('<');
+  if (istMuell) {
+    console.log('anfrage-create: Müll-Payload verworfen (HTML im Text)', {
+      name: nameRoh.slice(0, 60),
+    });
+    return jsonResponse(200, { success: true, skipped: 'muell-guard' });
+  }
+
   // ---- Zeile aufbauen ----
   // History: akzeptiert fertiges JSON-String oder Array. WICHTIG: Egal was
   // Power Automate im history-Feld mitschickt (auch ein leeres Array "[]"
