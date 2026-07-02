@@ -148,20 +148,37 @@ exports.handler = async (event) => {
   }
 
   // ---- Zeile aufbauen ----
-  // History: akzeptiert fertiges JSON-String oder Array; sonst Standardeintrag.
-  let historyStr;
+  // History: akzeptiert fertiges JSON-String oder Array. WICHTIG: Egal was
+  // Power Automate im history-Feld mitschickt (auch ein leeres Array "[]"
+  // zaehlt als "vorhanden" und wuerde sonst den Standardeintrag ueberspringen)
+  // -- es wird IMMER sichergestellt, dass ein "Erstellt"-Eintrag mit echtem
+  // Zeitstempel existiert. Nur so zeigt das Dashboard die Eingangs-Uhrzeit
+  // der Karte an (eingangsZeit() in App.jsx liest genau diesen Eintrag).
+  let historyArr;
   if (typeof payload.history === 'string' && payload.history.trim()) {
-    historyStr = payload.history;
+    try {
+      const parsed = JSON.parse(payload.history);
+      historyArr = Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      historyArr = [];
+    }
   } else if (Array.isArray(payload.history)) {
-    historyStr = JSON.stringify(payload.history);
+    historyArr = payload.history;
   } else {
-    historyStr = JSON.stringify([{
+    historyArr = [];
+  }
+  const hatErstelltEintrag = historyArr.some(
+    (e) => e && (e.aktion === 'Erstellt' || e.feld === 'Erstellt') && e.zeitstempel
+  );
+  if (!hatErstelltEintrag) {
+    historyArr = [{
       zeitstempel: new Date().toISOString(),
       feld: 'Erstellt',
       benutzer: 'Flow #1',
       wert: payload.quelle || 'E-Mail-Eingang',
-    }]);
+    }, ...historyArr];
   }
+  let historyStr = JSON.stringify(historyArr);
 
   // ---- Telefon prüfen: Praxisnummer abfangen (s.o.) ----
   const telNormalisiert = normalizeTelefon(payload.telefon);
