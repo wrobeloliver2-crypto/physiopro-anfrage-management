@@ -206,7 +206,7 @@ function normalizeTelefon(roh) {
 // ====================================================================
 // Haupt-Komponente
 // ====================================================================
-export default function App() {
+function Dashboard() {
   const [anfragen, setAnfragen] = useState([]);
   const [notizen, setNotizen] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1212,5 +1212,91 @@ function NeueAnfrageForm({ onClose, onSubmit, onMerge, checkDuplicate }) {
         </div>
       </div>
     </div>
+  );
+}
+
+// ====================================================================
+// Passwort-Gate — schlichter Zugangsschutz vor dem gesamten Dashboard.
+// Prueft gegen VITE_DASHBOARD_PW (Netlify-Env, pro Deploy-Kontext).
+// Merkt den Zugang in sessionStorage: uebersteht den 60s-Auto-Refresh,
+// ist aber beim Schliessen des Tabs wieder weg.
+// ====================================================================
+function PasswortGate({ children }) {
+  const ERWARTET = import.meta.env.VITE_DASHBOARD_PW;
+  const [frei, setFrei] = useState(() => sessionStorage.getItem('pp_auth') === 'ok');
+  const [eingabe, setEingabe] = useState('');
+  const [fehler, setFehler] = useState(false);
+
+  // Sicherung: fehlt die Env-Variable, NICHT einfach durchlassen (sonst waere
+  // das Gate bei versehentlich leerer Variable wirkungslos).
+  if (!ERWARTET) {
+    return (
+      <div style={gateWrap}>
+        <div style={gateBox}>
+          <h2 style={{ color: '#55725e', marginTop: 0 }}>Konfigurationsfehler</h2>
+          <p style={{ color: '#666' }}>
+            Das Zugangs-Kennwort ist nicht gesetzt. Bitte die Netlify-Variable{' '}
+            <code>VITE_DASHBOARD_PW</code> fuer diese Umgebung hinterlegen.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (frei) return children;
+
+  const pruefen = () => {
+    if (eingabe === ERWARTET) {
+      sessionStorage.setItem('pp_auth', 'ok');
+      setFrei(true);
+    } else {
+      setFehler(true);
+    }
+  };
+
+  return (
+    <div style={gateWrap}>
+      <div style={gateBox}>
+        <h2 style={{ color: '#55725e', marginTop: 0, fontFamily: 'Cormorant Garamond, serif' }}>
+          PhysioPro Dashboard
+        </h2>
+        <p style={{ color: '#666', marginTop: -8 }}>Bitte Kennwort eingeben</p>
+        <input
+          type="password"
+          value={eingabe}
+          autoFocus
+          onChange={(e) => { setEingabe(e.target.value); setFehler(false); }}
+          onKeyDown={(e) => { if (e.key === 'Enter') pruefen(); }}
+          style={gateInput}
+        />
+        {fehler && <div style={{ color: '#c0392b', marginTop: 8 }}>Kennwort falsch</div>}
+        <button onClick={pruefen} style={gateBtn}>Anmelden</button>
+      </div>
+    </div>
+  );
+}
+
+const gateWrap = {
+  minHeight: '100vh', display: 'flex', alignItems: 'center',
+  justifyContent: 'center', background: '#f5f2ec', fontFamily: 'DM Sans, sans-serif',
+};
+const gateBox = {
+  background: '#fff', padding: '2.5rem', borderRadius: 12,
+  boxShadow: '0 4px 24px rgba(0,0,0,0.08)', width: 320, textAlign: 'center',
+};
+const gateInput = {
+  width: '100%', padding: '0.7rem', fontSize: '1rem',
+  border: '1px solid #ccc', borderRadius: 6, boxSizing: 'border-box',
+};
+const gateBtn = {
+  marginTop: 16, width: '100%', padding: '0.7rem', background: '#55725e',
+  color: '#fff', border: 'none', borderRadius: 6, fontSize: '1rem', cursor: 'pointer',
+};
+
+export default function App() {
+  return (
+    <PasswortGate>
+      <Dashboard />
+    </PasswortGate>
   );
 }
