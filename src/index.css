@@ -344,6 +344,7 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 
 .osteo-ghost-btn { background:#fff; color:var(--osteo-dunkel); border:1px solid #d3e2e4; border-radius:7px; padding:7px 11px; font-size:11px; font-weight:600; cursor:pointer; font-family:var(--sans); transition:.15s; }
 .osteo-ghost-btn:hover { background:var(--osteo-hell); border-color:var(--osteo); }
+.osteo-mehr-btn { width:100%; margin-top:9px; text-align:center; }
 .osteo-fee-hint { font-size:10px; }
 .osteo-primary-btn { background:var(--osteo); color:#fff; border:none; border-radius:8px; padding:10px 14px; font-size:12px; font-weight:600; cursor:pointer; font-family:var(--sans); transition:background .15s; }
 .osteo-primary-btn:hover { background:var(--osteo-dunkel); }

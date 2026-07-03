@@ -124,6 +124,9 @@ function OsteoListe({ appts, loading, isReadOnly, onCancelled }) {
   const [cancelBusy, setCancelBusy] = useState(false);
   const [cancelError, setCancelError] = useState('');
   const [toast, setToast] = useState('');
+  const [expanded, setExpanded] = useState(false); // nur erste 2 Termine, Rest aufklappbar
+
+  const VORSCHAU = 2;
 
   if (loading) return <div className="osteo-empty">Wird geladen…</div>;
   if (!appts.length) return <div className="osteo-empty">Keine anstehenden Termine.</div>;
@@ -163,41 +166,52 @@ function OsteoListe({ appts, loading, isReadOnly, onCancelled }) {
     }
   };
 
+  const sichtbar = expanded ? appts : appts.slice(0, VORSCHAU);
+  const versteckt = appts.length - VORSCHAU;
+
+  const renderAppt = (a) => {
+    const dt = new Date(a.date + 'T' + a.time);
+    const when = dt.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' }) + ' · ' + a.time;
+    const hoursUntil = (dt - new Date()) / 3600000;
+    const free = hoursUntil >= 24;
+    return (
+      <div className="osteo-appt" key={a.id}>
+        <div className="osteo-appt-top">
+          <span className="osteo-appt-name">{esc(a.firstName)} {esc(a.lastName)}</span>
+          <span className="osteo-appt-when">{when}</span>
+        </div>
+        <div className="osteo-appt-meta">
+          {esc(a.practitioner || '')} · {a.type === 'check' ? 'Osteo-Check (20 Min)' : 'Osteopathie (60 Min)'} · {esc(a.email)}
+        </div>
+        <div className="osteo-badges">
+          <span className={'osteo-badge' + (a.confirmSent ? ' done' : '')}>{a.confirmSent ? '✓ ' : ''}Bestätigung</span>
+          <span className={'osteo-badge' + (a.reminder3dSent ? ' done' : '')}>{a.reminder3dSent ? '✓ ' : ''}Erinnerung 3 T.</span>
+          <span className={'osteo-badge' + (a.reminder24hSent ? ' done' : '')}>{a.reminder24hSent ? '✓ ' : ''}Erinnerung 24 h</span>
+        </div>
+        {!isReadOnly && (
+          <div className="osteo-appt-actions">
+            <button className="osteo-ghost-btn" onClick={() => askCancel(a)}>Termin absagen</button>
+            <span className="osteo-fee-hint" style={{ color: free ? 'var(--gruen)' : 'var(--bernstein)' }}>
+              {free ? 'Absage derzeit kostenfrei' : 'Kurzfristig – Ausfallhonorar-Prüfung'}
+            </span>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="osteo-card">
       <h3 className="osteo-card-h">Anstehende Termine</h3>
       <div className="osteo-list">
-        {appts.map((a) => {
-          const dt = new Date(a.date + 'T' + a.time);
-          const when = dt.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' }) + ' · ' + a.time;
-          const hoursUntil = (dt - new Date()) / 3600000;
-          const free = hoursUntil >= 24;
-          return (
-            <div className="osteo-appt" key={a.id}>
-              <div className="osteo-appt-top">
-                <span className="osteo-appt-name">{esc(a.firstName)} {esc(a.lastName)}</span>
-                <span className="osteo-appt-when">{when}</span>
-              </div>
-              <div className="osteo-appt-meta">
-                {esc(a.practitioner || '')} · {a.type === 'check' ? 'Osteo-Check (20 Min)' : 'Osteopathie (60 Min)'} · {esc(a.email)}
-              </div>
-              <div className="osteo-badges">
-                <span className={'osteo-badge' + (a.confirmSent ? ' done' : '')}>{a.confirmSent ? '✓ ' : ''}Bestätigung</span>
-                <span className={'osteo-badge' + (a.reminder3dSent ? ' done' : '')}>{a.reminder3dSent ? '✓ ' : ''}Erinnerung 3 T.</span>
-                <span className={'osteo-badge' + (a.reminder24hSent ? ' done' : '')}>{a.reminder24hSent ? '✓ ' : ''}Erinnerung 24 h</span>
-              </div>
-              {!isReadOnly && (
-                <div className="osteo-appt-actions">
-                  <button className="osteo-ghost-btn" onClick={() => askCancel(a)}>Termin absagen</button>
-                  <span className="osteo-fee-hint" style={{ color: free ? 'var(--gruen)' : 'var(--bernstein)' }}>
-                    {free ? 'Absage derzeit kostenfrei' : 'Kurzfristig – Ausfallhonorar-Prüfung'}
-                  </span>
-                </div>
-              )}
-            </div>
-          );
-        })}
+        {sichtbar.map(renderAppt)}
       </div>
+
+      {appts.length > VORSCHAU && (
+        <button className="osteo-ghost-btn osteo-mehr-btn" onClick={() => setExpanded(!expanded)}>
+          {expanded ? 'Weniger anzeigen' : `+ ${versteckt} weitere ${versteckt === 1 ? 'Termin' : 'Termine'} anzeigen`}
+        </button>
+      )}
 
       {cancelTarget && (
         <div className="osteo-overlay" onClick={() => !cancelBusy && setCancelTarget(null)}>
