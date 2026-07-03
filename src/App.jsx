@@ -1257,10 +1257,12 @@ function PasswortGate({ children }) {
   return (
     <div style={gateWrap}>
       <div style={gateBox}>
-        <h2 style={{ color: '#55725e', marginTop: 0, fontFamily: 'Cormorant Garamond, serif' }}>
-          PhysioPro Dashboard
-        </h2>
-        <p style={{ color: '#666', marginTop: -8 }}>Bitte Kennwort eingeben</p>
+        <img
+          src="/logo-physio.svg"
+          alt="PhysioPro Lübeck"
+          style={{ width: 150, height: 'auto', margin: '0 auto 1.25rem', display: 'block' }}
+        />
+        <p style={{ color: '#666', marginTop: 0 }}>Bitte Kennwort eingeben</p>
         <input
           type="password"
           value={eingabe}
