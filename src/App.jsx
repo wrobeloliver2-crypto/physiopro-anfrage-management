@@ -654,9 +654,14 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
   const faellig = followupFaellig(anfrage);
   // Sofort-Reminder (ersetzt Flow 2A): Sofort-Karte, noch offen/aktiv,
   // seit >60 Min ohne Aktivität → auffällige visuelle Eskalation im Board.
+  // Bewusst NICHT an fristStatus gekoppelt (das unterdrückt Karten, deren
+  // Anker nicht von heute ist) — eine seit gestern offene Sofort-Karte ist
+  // erst recht überfällig.
+  const sofortAnker = fristAnkerTS(anfrage);
   const sofortUeberfaellig = anfrage.prioritaet === 'Sofort'
-    && !['Erledigt','Weitergeleitet'].includes(anfrage.status)
-    && fristStatus(anfrage) === 'rot';
+    && !['Erledigt','Weitergeleitet','To Do'].includes(anfrage.status)
+    && !!sofortAnker
+    && (Date.now() - sofortAnker.getTime()) >= 60 * 60 * 1000;
   const stop = (e, fn) => { e.stopPropagation(); fn(); };
   const schritte = istTodo ? SCHRITTE_HAENGT : SCHRITTE_AKTIV;
 
