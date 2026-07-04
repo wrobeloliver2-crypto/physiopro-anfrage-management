@@ -280,6 +280,8 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 .erg-chip-absage { background:var(--bernstein-hell); color:#fff; font-weight:500; }
 .muell-ergebnis-absage { background:#f7e9d6; color:var(--bernstein); font-weight:500; }
 .muell-best-chip { display:inline-flex; align-items:center; gap:4px; font-size:11px; background:#dff0e4; color:#2f6b43; font-weight:500; padding:3px 9px; border-radius:7px; width:fit-content; margin:2px 0; }
+.muell-notiz { display:inline-flex; align-items:flex-start; gap:5px; font-size:11px; line-height:1.4; background:#fbeae8; color:#8f3b30; padding:4px 9px; border-radius:7px; width:fit-content; max-width:420px; margin:2px 0; }
+.muell-notiz svg { flex-shrink:0; margin-top:1px; }
 .erg-best-hinweis { display:flex; align-items:center; gap:5px; font-size:12px; color:#2f6b43; margin:8px 0 0; }
 
 /* Google Ads Kanal-Chip auf der Karte */

@@ -808,6 +808,9 @@ function Muelleimer({ anfragen, isReadOnly, onCardClick, onZurueckholen }) {
                 {bestaetigungGesendet(a) && (
                   <span className="muell-best-chip"><Mail size={11} /> Entwurf erstellt</span>
                 )}
+                {a.ergebnis === ERGEBNIS_BEGRUENDUNG_PFLICHT && a.notizen && a.notizen.trim() && (
+                  <span className="muell-notiz"><FileText size={11} /> {a.notizen.trim()}</span>
+                )}
                 <span className="muell-meta">
                   <Check size={11} /> erledigt {wann}
                   {verbleibend !== null && <span className="muell-rest"> · noch {verbleibend} Tag{verbleibend===1?'':'e'}</span>}
