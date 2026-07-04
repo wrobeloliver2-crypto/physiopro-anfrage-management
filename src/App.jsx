@@ -411,8 +411,14 @@ function Dashboard() {
   const cardSetSchritt = (anfrage, schritt) => {
     persist(anfragen.map((a) => a.id===anfrage.id ? { ...a, schritt, history:[...a.history, historyEintrag('Schritt', currentUser, schritt)] } : a));
   };
+  const weiterleitenBusy = useRef(false);
   const weiterleiten = (anfrage, an) => {
-    persist(anfragen.map((a) => a.id===anfrage.id ? {
+    if (weiterleitenBusy.current) return;   // Schutz gegen Doppel-Klick
+    weiterleitenBusy.current = true;
+    setTimeout(() => { weiterleitenBusy.current = false; }, 1500);
+    // Match per Objekt-Identität (a===anfrage), NICHT nur per id — schützt
+    // gegen versehentliches Mit-Weiterleiten von Karten mit doppelter id.
+    persist(anfragen.map((a) => a===anfrage ? {
       ...a, status:'Weitergeleitet', weitergeleitetAn: an, reminderStatus:'weitergeleitet-gesendet',
       history:[...a.history, historyEintrag('Weitergeleitet', currentUser, 'an '+an)]
     } : a));
@@ -436,12 +442,12 @@ function Dashboard() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
         const grund = (data && (data.error || data.skipped)) || ('HTTP '+res.status);
-        setAnfragen((prev) => { const next = prev.map((a) => a.id===anfrage.id ? {
+        setAnfragen((prev) => { const next = prev.map((a) => (a.id===anfrage.id && a.eingangsdatum===anfrage.eingangsdatum && a.name===anfrage.name) ? {
           ...a, history:[...a.history, historyEintrag('Mailversand', 'System', 'FEHLGESCHLAGEN: '+grund)]
         } : a); saveToSheets(next); return next; });
       }
     } catch (e) {
-      setAnfragen((prev) => { const next = prev.map((a) => a.id===anfrage.id ? {
+      setAnfragen((prev) => { const next = prev.map((a) => (a.id===anfrage.id && a.eingangsdatum===anfrage.eingangsdatum && a.name===anfrage.name) ? {
         ...a, history:[...a.history, historyEintrag('Mailversand', 'System', 'FEHLGESCHLAGEN: '+(e.message||'Netzwerkfehler'))]
       } : a); saveToSheets(next); return next; });
     }
