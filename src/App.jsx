@@ -669,7 +669,7 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
     <div className={'karte'+(istTodo?' karte-todo':'')+(sofortUeberfaellig?' karte-sofort-alarm':'')} onClick={onClick}
       style={{ borderLeftColor: istTodo ? '#d99a3a' : prio.rand }}>
       {sofortUeberfaellig && (
-        <div className="karte-sofort-banner"><AlertTriangle size={12} /> Sofort überfällig – bitte anrufen</div>
+        <div className="karte-sofort-banner"><AlertTriangle size={12} /> Überfällig</div>
       )}
       <div className="karte-kopf">
         <span className="karte-name">{anfrage.name}</span>
