@@ -73,6 +73,9 @@ const istTerminErgebnis = (e) => typeof e === 'string' && e.startsWith('Termin v
 const istAbsage = (e) => typeof e === 'string' && e.startsWith('Terminabsage');
 // Diese Absage-Option schließt NICHT ab, sondern erzwingt erst "Ausfallrechnung schreiben" (To Do).
 const ERGEBNIS_AUSFALLRECHNUNG = 'Terminabsage – kurzfristig (<24h, mit Ausfallrechnung)';
+// Diese Option verlangt beim Abschließen eine kurze Pflicht-Begründung,
+// die in die Notizen übernommen wird.
+const ERGEBNIS_BEGRUENDUNG_PFLICHT = 'Kein Interesse / zurückgezogen';
 
 // Uhrzeit-Slots 08:00–18:00 in 30-Min-Schritten
 const ZEIT_SLOTS = (() => {
@@ -352,7 +355,16 @@ function Dashboard() {
     } : a));
   };
   // Abschluss mit Ergebnis (aus dem Pflicht-Popup)
-  const cardErledigt = (anfrage, ergebnis) => {
+  const cardErledigt = (anfrage, ergebnis, begruendung = '') => {
+    // Optionale Pflicht-Begründung (z.B. bei "Kein Interesse / zurückgezogen")
+    // wird an die Notizen angehängt.
+    const notizMit = (basis) => {
+      const b = (begruendung || '').trim();
+      if (!b) return basis.notizen;
+      const alt = (basis.notizen || '').trim();
+      const zeile = ergebnis + ': ' + b;
+      return alt ? alt + '\n' + zeile : zeile;
+    };
     // Sonderfall: kurzfristige Absage MIT Ausfallrechnung → nicht erledigen,
     // sondern in To Do mit Schritt "Ausfallrechnung schreiben". Ergebnis wird
     // schon gespeichert. Erst der nächste Erledigt-Klick schließt ab (ohne Popup,
@@ -382,9 +394,9 @@ function Dashboard() {
       return;
     }
     persist(anfragen.map((a) => a.id===anfrage.id ? {
-      ...a, ...anfrage, status: 'Erledigt', ergebnis,
+      ...a, ...anfrage, status: 'Erledigt', ergebnis, notizen: notizMit({ ...a, ...anfrage }),
       bearbeiter: (anfrage.bearbeiter && anfrage.bearbeiter!=='Unzugewiesen') ? anfrage.bearbeiter : currentUser,
-      history:[...(anfrage.history || a.history || []), historyEintrag('Status', currentUser, (anfrage.status||a.status)+' → Erledigt'), historyEintrag('Ergebnis', currentUser, ergebnis)]
+      history:[...(anfrage.history || a.history || []), historyEintrag('Status', currentUser, (anfrage.status||a.status)+' → Erledigt'), historyEintrag('Ergebnis', currentUser, ergebnis), ...(begruendung && begruendung.trim() ? [historyEintrag('Begründung', currentUser, begruendung.trim())] : [])]
     } : a));
     setErgebnisAnfrage(null); setSelectedAnfrage(null);
   };
@@ -1015,7 +1027,14 @@ function DraftModal({ anfrage, ergebnis, onClose, onBack, onErfolg, onKeineEmail
 function ErgebnisModal({ anfrage, onClose, onConfirm }) {
   const [auswahl, setAuswahl] = useState('');
   const [alleZeigen, setAlleZeigen] = useState(false);
+  const [begruendung, setBegruendung] = useState('');
   const gruppen = alleZeigen ? ERGEBNIS_GRUPPEN : ERGEBNIS_GRUPPEN.slice(0, 2);
+  const brauchtBegruendung = auswahl === ERGEBNIS_BEGRUENDUNG_PFLICHT;
+  const begruendungFehlt = brauchtBegruendung && !begruendung.trim();
+  const bestaetigen = () => {
+    if (!auswahl || begruendungFehlt) return;
+    onConfirm(anfrage, auswahl, brauchtBegruendung ? begruendung.trim() : '');
+  };
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal modal-schmal" onClick={(e) => e.stopPropagation()}>
@@ -1045,14 +1064,24 @@ function ErgebnisModal({ anfrage, onClose, onConfirm }) {
           {!alleZeigen && (
             <button className="erg-mehr" onClick={() => setAlleZeigen(true)}>… weitere Gründe</button>
           )}
+          {brauchtBegruendung && (
+            <div className="erg-begruendung">
+              <label className="erg-begruendung-label">Kurze Begründung (Pflicht)</label>
+              <textarea className="erg-begruendung-feld" rows={2} autoFocus
+                placeholder="z. B. anderer Anbieter gewählt, Beschwerden abgeklungen …"
+                value={begruendung} onChange={(e) => setBegruendung(e.target.value)} />
+              <p className="erg-begruendung-hinweis">Wird in die Notizen übernommen.</p>
+            </div>
+          )}
         </div>
         <div className="modal-fuss">
           <button className="abbrechen-btn" onClick={onClose}>Abbrechen</button>
-          <button className="speichern-btn" disabled={!auswahl} onClick={() => auswahl && onConfirm(anfrage, auswahl)}>
+          <button className="speichern-btn" disabled={!auswahl || begruendungFehlt} onClick={bestaetigen}>
             Erledigt
           </button>
         </div>
         {!auswahl && <p className="erg-hinweis">Ohne Auswahl nicht möglich</p>}
+        {begruendungFehlt && <p className="erg-hinweis">Begründung erforderlich</p>}
       </div>
     </div>
   );

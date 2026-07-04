@@ -261,6 +261,11 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 .erg-mehr { background:none; border:none; color:var(--grau); font-family:var(--sans); font-size:13px; cursor:pointer; padding:4px 0; }
 .erg-mehr:hover { color:var(--gruen); }
 .erg-hinweis { font-size:11px; color:var(--grau-hell); text-align:center; padding:0 0 12px; margin:-4px 0 0; }
+.erg-begruendung { margin:10px 0 4px; padding:12px 13px; background:#fbeae8; border:1px solid #e9cfca; border-radius:8px; }
+.erg-begruendung-label { display:block; font-size:11px; font-weight:600; color:#c0392b; text-transform:uppercase; letter-spacing:.03em; margin:0 0 6px; }
+.erg-begruendung-feld { width:100%; box-sizing:border-box; font-family:var(--sans); font-size:13px; color:var(--text); border:1px solid #e2b8b1; border-radius:6px; padding:8px 10px; resize:vertical; background:#fff; }
+.erg-begruendung-feld:focus { outline:none; border-color:#c0392b; }
+.erg-begruendung-hinweis { font-size:10px; color:var(--grau); margin:6px 0 0; }
 .speichern-btn:disabled { opacity:.45; cursor:not-allowed; }
 /* Ergebnis-Anzeige im Detail-Modal */
 .erg-anzeige { display:flex; align-items:center; gap:10px; }
