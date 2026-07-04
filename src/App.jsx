@@ -652,12 +652,20 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
   const istTodo = spalte==='To Do';
   const istBearb = spalte==='In Bearbeitung';
   const faellig = followupFaellig(anfrage);
+  // Sofort-Reminder (ersetzt Flow 2A): Sofort-Karte, noch offen/aktiv,
+  // seit >60 Min ohne Aktivität → auffällige visuelle Eskalation im Board.
+  const sofortUeberfaellig = anfrage.prioritaet === 'Sofort'
+    && !['Erledigt','Weitergeleitet'].includes(anfrage.status)
+    && fristStatus(anfrage) === 'rot';
   const stop = (e, fn) => { e.stopPropagation(); fn(); };
   const schritte = istTodo ? SCHRITTE_HAENGT : SCHRITTE_AKTIV;
 
   return (
-    <div className={'karte'+(istTodo?' karte-todo':'')} onClick={onClick}
+    <div className={'karte'+(istTodo?' karte-todo':'')+(sofortUeberfaellig?' karte-sofort-alarm':'')} onClick={onClick}
       style={{ borderLeftColor: istTodo ? '#d99a3a' : prio.rand }}>
+      {sofortUeberfaellig && (
+        <div className="karte-sofort-banner"><AlertTriangle size={12} /> Sofort überfällig – bitte anrufen</div>
+      )}
       <div className="karte-kopf">
         <span className="karte-name">{anfrage.name}</span>
         {istTodo ? <AlertTriangle size={12} color="#b8742a" />
