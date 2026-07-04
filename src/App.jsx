@@ -17,6 +17,7 @@ import OsteoTermine from './OsteoTermine';
 const BACKEND_BASE = import.meta.env.VITE_BACKEND_BASE || '';
 const API_URL = BACKEND_BASE + '/.netlify/functions/sheets-api';
 const NOTES_URL = BACKEND_BASE + '/.netlify/functions/notes-api';
+const WEITERLEITUNG_URL = BACKEND_BASE + '/.netlify/functions/weiterleitung-send';
 
 const SPALTEN = ['Offen', 'In Bearbeitung', 'To Do'];
 const ALLE_STATUS = ['Offen', 'In Bearbeitung', 'To Do', 'Erledigt', 'Weitergeleitet'];
@@ -412,10 +413,38 @@ function Dashboard() {
   };
   const weiterleiten = (anfrage, an) => {
     persist(anfragen.map((a) => a.id===anfrage.id ? {
-      ...a, status:'Weitergeleitet', weitergeleitetAn: an, reminderStatus:'',
+      ...a, status:'Weitergeleitet', weitergeleitetAn: an, reminderStatus:'weitergeleitet-gesendet',
       history:[...a.history, historyEintrag('Weitergeleitet', currentUser, 'an '+an)]
     } : a));
     setWeiterleitenAnfrage(null); setSelectedAnfrage(null);
+    // Mail direkt versenden (ersetzt den pollenden Flow #2). Fehler werden
+    // in der History protokolliert, blockieren aber die Weiterleitung nicht.
+    sendeWeiterleitungsMail(anfrage, an);
+  };
+  const sendeWeiterleitungsMail = async (anfrage, an) => {
+    try {
+      const res = await fetch(WEITERLEITUNG_URL, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          an,
+          name: anfrage.name, telefon: anfrage.telefon, email: anfrage.email,
+          anliegen: anfrage.anliegen, prioritaet: anfrage.prioritaet,
+          quelle: anfrage.quelle, eingangsdatum: anfrage.eingangsdatum,
+          notizen: anfrage.notizen,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        const grund = (data && (data.error || data.skipped)) || ('HTTP '+res.status);
+        setAnfragen((prev) => { const next = prev.map((a) => a.id===anfrage.id ? {
+          ...a, history:[...a.history, historyEintrag('Mailversand', 'System', 'FEHLGESCHLAGEN: '+grund)]
+        } : a); saveToSheets(next); return next; });
+      }
+    } catch (e) {
+      setAnfragen((prev) => { const next = prev.map((a) => a.id===anfrage.id ? {
+        ...a, history:[...a.history, historyEintrag('Mailversand', 'System', 'FEHLGESCHLAGEN: '+(e.message||'Netzwerkfehler'))]
+      } : a); saveToSheets(next); return next; });
+    }
   };
   const deleteAnfrage = (anfrage) => {
     if (!window.confirm('Anfrage von '+anfrage.name+' wirklich loeschen?')) return;
