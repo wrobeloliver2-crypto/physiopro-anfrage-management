@@ -48,6 +48,7 @@ const COLUMNS = [
   'utm_campaign',     // W
   'utm_content',      // X
   'gclid',            // Y
+  'dsgvoEinwilligungKruse', // Z
 ];
 
 // ---- Telefon-Normalisierung (IDENTISCH zum Dashboard / App.jsx) ----
@@ -249,6 +250,7 @@ exports.handler = async (event) => {
     utm_campaign: payload.utm_campaign || '', // W
     utm_content:  payload.utm_content  || '', // X
     gclid:        payload.gclid        || '', // Y
+    dsgvoEinwilligungKruse: payload.dsgvoEinwilligungKruse || '', // Z
   };
 
   const row = COLUMNS.map((k) => (obj[k] !== undefined && obj[k] !== null ? String(obj[k]) : ''));
