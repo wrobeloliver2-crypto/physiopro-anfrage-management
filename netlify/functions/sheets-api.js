@@ -8,7 +8,7 @@ const { google } = require('googleapis');
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 // Tab-Name wird dynamisch ermittelt (robust gegen 'Tabellenblatt1' vs 'Sheet1')
 
-// Spalten-Reihenfolge entspricht dem Sheet-Schema A..R
+// Spalten-Reihenfolge entspricht dem Sheet-Schema A..Z
 // P (__PowerAppsId__) wird vom Google-Connector verwaltet und transparent durchgereicht.
 const COLUMNS = [
   'id',
