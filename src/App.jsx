@@ -223,6 +223,17 @@ function suchtreffer(a, suchbegriff) {
   return nameHit || emailHit || telHit;
 }
 
+// ---- Standort-Erkennung: Offen-Spalte nach Bad Schwartau / Stockelsdorf ----
+// Bad-Schwartau-Anfragen tragen "Standort: Bad Schwartau" im Anliegen-Text
+// (gesetzt in termin.html, kommt über den Mail-Weg -> anfrage-create.js so
+// im Sheet an). Alles andere (Hauptstandort Lübeck, ab sofort intern als
+// "Stockelsdorf" bezeichnet, sowie jede nicht eindeutig zuordenbare Anfrage)
+// landet automatisch im Stockelsdorf-Bereich -- das ist der gewünschte
+// Fallback, es gibt keine dritte/unklare Kategorie.
+function istBadSchwartauAnfrage(a) {
+  return (a.anliegen || '').includes('Standort: Bad Schwartau');
+}
+
 // ====================================================================
 // Haupt-Komponente
 // ====================================================================
@@ -558,8 +569,16 @@ function Dashboard() {
           {loading && anfragen.length===0 ? (
             <div className="lade-zustand"><div className="spinner" /><span>Daten laden…</span></div>
           ) : ansicht==='aktiv' ? (
-            <div className="spalten-grid">
-              {SPALTEN.map((status) => (
+            <div className="spalten-grid spalten-grid-4">
+              <StatusSpalte key="Offen-bs" status="Offen" standort="bad-schwartau"
+                anfragen={sichtbarGefiltert.filter((a) => a.status==='Offen' && istBadSchwartauAnfrage(a))}
+                isReadOnly={isReadOnly} currentUser={currentUser} onCardClick={setSelectedAnfrage}
+                onMove={cardMove} onSetSchritt={cardSetSchritt} onWeiterleiten={setWeiterleitenAnfrage} />
+              <StatusSpalte key="Offen-sto" status="Offen" standort="stockelsdorf"
+                anfragen={sichtbarGefiltert.filter((a) => a.status==='Offen' && !istBadSchwartauAnfrage(a))}
+                isReadOnly={isReadOnly} currentUser={currentUser} onCardClick={setSelectedAnfrage}
+                onMove={cardMove} onSetSchritt={cardSetSchritt} onWeiterleiten={setWeiterleitenAnfrage} />
+              {SPALTEN.filter((status) => status !== 'Offen').map((status) => (
                 <StatusSpalte key={status} status={status}
                   anfragen={sichtbarGefiltert.filter((a) => a.status===status)}
                   isReadOnly={isReadOnly} currentUser={currentUser} onCardClick={setSelectedAnfrage}
@@ -643,7 +662,7 @@ function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeut
 // ====================================================================
 // StatusSpalte (Box mit farbigem Kopf)
 // ====================================================================
-function StatusSpalte({ status, anfragen, isReadOnly, currentUser, onCardClick, onMove, onSetSchritt, onWeiterleiten }) {
+function StatusSpalte({ status, standort, anfragen, isReadOnly, currentUser, onCardClick, onMove, onSetSchritt, onWeiterleiten }) {
   const meta = SPALTEN_META[status];
   const istTodoSpalte = status === 'To Do';
   const [todoTab, setTodoTab] = useState(() => localStorage.getItem('todoSpalteTab') || 'todo');
@@ -655,10 +674,16 @@ function StatusSpalte({ status, anfragen, isReadOnly, currentUser, onCardClick, 
     try { localStorage.setItem('todoSpalteTab', tab); } catch {}
   };
 
+  // Offen wird in zwei Standort-Spalten aufgeteilt (Bad Schwartau / Stockelsdorf,
+  // s. istBadSchwartauAnfrage). Gleiche Farbe/Icon wie die normale Offen-Spalte,
+  // nur der Titel unterscheidet sich.
   const zaehler = (zeigtOsteo || zeigtKruse) ? null : anfragen.length;
   const Icon = zeigtOsteo ? Calendar : zeigtKruse ? FileText : meta.icon;
   const kopfFarbe = zeigtOsteo ? 'var(--osteo)' : zeigtKruse ? 'var(--kruse)' : meta.farbe;
-  const kopfTitel = zeigtOsteo ? 'Osteo-Termine' : zeigtKruse ? 'Kruse-Anfragen' : status;
+  const kopfTitel = zeigtOsteo ? 'Osteo-Termine' : zeigtKruse ? 'Kruse-Anfragen'
+    : standort === 'bad-schwartau' ? 'Offen · Bad Schwartau'
+    : standort === 'stockelsdorf' ? 'Offen · Stockelsdorf'
+    : status;
 
   return (
     <section className="spalte-box" style={{ background: zeigtOsteo ? 'var(--osteo-hell)' : zeigtKruse ? 'var(--kruse-hell)' : meta.box, borderColor: zeigtOsteo ? '#c3dade' : zeigtKruse ? '#c9d3e0' : meta.rand }}>
