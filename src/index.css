@@ -291,6 +291,13 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 .karte-best-chip svg { flex-shrink:0; }
 .karte-best-offen { color:#2f6b43; background:#dff0e4; }
 .karte-best-offen svg { color:#2f6b43; }
+/* DSGVO-Einwilligung Datenanforderung Kruse (Bad Schwartau) */
+.karte-dsgvo-chip { display:flex; align-items:center; gap:5px; font-size:11px; font-weight:500; padding:4px 9px; border-radius:7px; margin-top:6px; line-height:1.4; }
+.karte-dsgvo-chip svg { flex-shrink:0; }
+.karte-dsgvo-ja { color:#2f6b43; background:#dff0e4; }
+.karte-dsgvo-ja svg { color:#2f6b43; }
+.karte-dsgvo-nein { color:#8f3b30; background:#fbeae8; }
+.karte-dsgvo-nein svg { color:#8f3b30; }
 
 /* ════════════════════════════════════════════════
    Osteopathie-Termine (Tab in der To-Do-Spalte)
