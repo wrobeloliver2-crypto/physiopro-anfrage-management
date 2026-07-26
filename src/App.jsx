@@ -207,6 +207,21 @@ function normalizeTelefon(roh) {
   return '+' + n;
 }
 
+// ---- Generelles Suchfeld: Treffer auf Name, Telefon, E-Mail ----
+// Telefon wird über Ziffern verglichen (normalizeTelefon-Ziffernkern), damit
+// "0451...", "+49451..." und "0049451..." alle als derselbe Treffer zählen.
+function suchtreffer(a, suchbegriff) {
+  const q = (suchbegriff || '').trim();
+  if (!q) return true;
+  const ql = q.toLowerCase();
+  const qDigits = q.replace(/[^0-9]/g, '');
+  const nameHit = (a.name || '').toLowerCase().includes(ql);
+  const emailHit = (a.email || '').toLowerCase().includes(ql);
+  const telDigits = String(a.telefon || '').replace(/[^0-9]/g, '');
+  const telHit = qDigits.length >= 3 && telDigits.includes(qDigits);
+  return nameHit || emailHit || telHit;
+}
+
 // ====================================================================
 // Haupt-Komponente
 // ====================================================================
@@ -223,6 +238,7 @@ function Dashboard() {
   const [error, setError] = useState(null);
   const [letzteAenderung, setLetzteAenderung] = useState(null);
   const [ansicht, setAnsicht] = useState('aktiv'); // 'aktiv' | 'muelleimer'
+  const [suchbegriff, setSuchbegriff] = useState('');
 
   const isReadOnly = READ_ONLY_USERS.includes(currentUser);
 
@@ -504,6 +520,12 @@ function Dashboard() {
   const erledigtHeute = useMemo(() => anfragen.filter((a) => a.status==='Erledigt' && istHeute(a.eingangsdatum)).length, [anfragen]);
   const weitergeleitetHeute = useMemo(() => anfragen.filter((a) => a.status==='Weitergeleitet' && istHeute(a.eingangsdatum)).length, [anfragen]);
 
+  // Suchfeld filtert nur die Anzeige (Karten in den Spalten/im Archiv) –
+  // die Kopfzeilen-Zähler (offen/sofort/erledigt/weitergeleitet) bleiben
+  // unabhängig von der Suche, damit sie immer den Gesamtstand zeigen.
+  const sichtbarGefiltert = suchbegriff.trim() ? sichtbar.filter((a) => suchtreffer(a, suchbegriff)) : sichtbar;
+  const muelleimerGefiltert = suchbegriff.trim() ? muelleimer.filter((a) => suchtreffer(a, suchbegriff)) : muelleimer;
+
   return (
     <div className="app-shell">
       <div className="panel">
@@ -512,6 +534,7 @@ function Dashboard() {
           erledigtHeute={erledigtHeute} weitergeleitetHeute={weitergeleitetHeute}
           letzteAenderung={letzteAenderung} currentUser={currentUser}
           setCurrentUser={setCurrentUser} isReadOnly={isReadOnly}
+          suchbegriff={suchbegriff} setSuchbegriff={setSuchbegriff}
           onNeu={() => setShowNewForm(true)} onRefresh={() => { loadFromSheets(); loadNotes(); }}
         />
         {error && (
@@ -526,19 +549,24 @@ function Dashboard() {
               <Archive size={14} /> Archiv{muelleimer.length ? ' ('+muelleimer.length+')' : ''}
             </button>
           </div>
+          {suchbegriff.trim() && (
+            <p className="such-hinweis">
+              {sichtbarGefiltert.length + muelleimerGefiltert.length} Treffer für „{suchbegriff.trim()}"
+            </p>
+          )}
           {loading && anfragen.length===0 ? (
             <div className="lade-zustand"><div className="spinner" /><span>Daten laden…</span></div>
           ) : ansicht==='aktiv' ? (
             <div className="spalten-grid">
               {SPALTEN.map((status) => (
                 <StatusSpalte key={status} status={status}
-                  anfragen={sichtbar.filter((a) => a.status===status)}
+                  anfragen={sichtbarGefiltert.filter((a) => a.status===status)}
                   isReadOnly={isReadOnly} onCardClick={setSelectedAnfrage}
                   onMove={cardMove} onSetSchritt={cardSetSchritt} onWeiterleiten={setWeiterleitenAnfrage} />
               ))}
             </div>
           ) : (
-            <Muelleimer anfragen={muelleimer} isReadOnly={isReadOnly}
+            <Muelleimer anfragen={muelleimerGefiltert} isReadOnly={isReadOnly}
               onCardClick={setSelectedAnfrage} onZurueckholen={zurueckholen} />
           )}
           <UebergabeNotizen notizen={notizen} isReadOnly={isReadOnly} onAdd={addNotiz} onDelete={deleteNotiz} />
@@ -574,7 +602,7 @@ function Dashboard() {
 // ====================================================================
 // Kopfzeile
 // ====================================================================
-function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeute, letzteAenderung, currentUser, setCurrentUser, isReadOnly, onNeu, onRefresh }) {
+function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeute, letzteAenderung, currentUser, setCurrentUser, isReadOnly, suchbegriff, setSuchbegriff, onNeu, onRefresh }) {
   const aenderungsZeit = letzteAenderung ? letzteAenderung.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}) : '—';
   return (
     <div className="kopfzeile">
@@ -591,6 +619,14 @@ function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeut
             <div className="chip chip-lila"><Send size={13} /><span>{weitergeleitetHeute} weitergeleitet</span></div>
           )}
         </div>
+      </div>
+      <div className="kopf-suche">
+        <Search size={14} />
+        <input type="text" className="such-input" placeholder="Name, Telefon oder E-Mail suchen…"
+          value={suchbegriff} onChange={(e) => setSuchbegriff(e.target.value)} aria-label="Anfragen durchsuchen" />
+        {suchbegriff && (
+          <button type="button" className="such-clear" onClick={() => setSuchbegriff('')} aria-label="Suche leeren"><X size={13} /></button>
+        )}
       </div>
       <div className="kopf-rechts">
         <span className="kopf-stats">{offeneCount} offen{sofortCount>0 ? ' · '+sofortCount+' sofort' : ''}</span>
