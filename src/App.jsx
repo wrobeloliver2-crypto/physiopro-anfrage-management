@@ -7,6 +7,7 @@ import {
   CheckCircle2, Frown, CalendarX, Megaphone, Archive,
 } from 'lucide-react';
 import OsteoTermine from './OsteoTermine';
+import KruseAnfragen from './KruseAnfragen';
 
 // ====================================================================
 // Konfiguration
@@ -207,6 +208,32 @@ function normalizeTelefon(roh) {
   return '+' + n;
 }
 
+// ---- Generelles Suchfeld: Treffer auf Name, Telefon, E-Mail ----
+// Telefon wird über Ziffern verglichen (normalizeTelefon-Ziffernkern), damit
+// "0451...", "+49451..." und "0049451..." alle als derselbe Treffer zählen.
+function suchtreffer(a, suchbegriff) {
+  const q = (suchbegriff || '').trim();
+  if (!q) return true;
+  const ql = q.toLowerCase();
+  const qDigits = q.replace(/[^0-9]/g, '');
+  const nameHit = (a.name || '').toLowerCase().includes(ql);
+  const emailHit = (a.email || '').toLowerCase().includes(ql);
+  const telDigits = String(a.telefon || '').replace(/[^0-9]/g, '');
+  const telHit = qDigits.length >= 3 && telDigits.includes(qDigits);
+  return nameHit || emailHit || telHit;
+}
+
+// ---- Standort-Erkennung: Offen-Spalte nach Bad Schwartau / Stockelsdorf ----
+// Bad-Schwartau-Anfragen tragen "Standort: Bad Schwartau" im Anliegen-Text
+// (gesetzt in termin.html, kommt über den Mail-Weg -> anfrage-create.js so
+// im Sheet an). Alles andere (Hauptstandort Lübeck, ab sofort intern als
+// "Stockelsdorf" bezeichnet, sowie jede nicht eindeutig zuordenbare Anfrage)
+// landet automatisch im Stockelsdorf-Bereich -- das ist der gewünschte
+// Fallback, es gibt keine dritte/unklare Kategorie.
+function istBadSchwartauAnfrage(a) {
+  return (a.anliegen || '').includes('Standort: Bad Schwartau');
+}
+
 // ====================================================================
 // Haupt-Komponente
 // ====================================================================
@@ -223,6 +250,7 @@ function Dashboard() {
   const [error, setError] = useState(null);
   const [letzteAenderung, setLetzteAenderung] = useState(null);
   const [ansicht, setAnsicht] = useState('aktiv'); // 'aktiv' | 'muelleimer'
+  const [suchbegriff, setSuchbegriff] = useState('');
 
   const isReadOnly = READ_ONLY_USERS.includes(currentUser);
 
@@ -504,6 +532,12 @@ function Dashboard() {
   const erledigtHeute = useMemo(() => anfragen.filter((a) => a.status==='Erledigt' && istHeute(a.eingangsdatum)).length, [anfragen]);
   const weitergeleitetHeute = useMemo(() => anfragen.filter((a) => a.status==='Weitergeleitet' && istHeute(a.eingangsdatum)).length, [anfragen]);
 
+  // Suchfeld filtert nur die Anzeige (Karten in den Spalten/im Archiv) –
+  // die Kopfzeilen-Zähler (offen/sofort/erledigt/weitergeleitet) bleiben
+  // unabhängig von der Suche, damit sie immer den Gesamtstand zeigen.
+  const sichtbarGefiltert = suchbegriff.trim() ? sichtbar.filter((a) => suchtreffer(a, suchbegriff)) : sichtbar;
+  const muelleimerGefiltert = suchbegriff.trim() ? muelleimer.filter((a) => suchtreffer(a, suchbegriff)) : muelleimer;
+
   return (
     <div className="app-shell">
       <div className="panel">
@@ -512,6 +546,7 @@ function Dashboard() {
           erledigtHeute={erledigtHeute} weitergeleitetHeute={weitergeleitetHeute}
           letzteAenderung={letzteAenderung} currentUser={currentUser}
           setCurrentUser={setCurrentUser} isReadOnly={isReadOnly}
+          suchbegriff={suchbegriff} setSuchbegriff={setSuchbegriff}
           onNeu={() => setShowNewForm(true)} onRefresh={() => { loadFromSheets(); loadNotes(); }}
         />
         {error && (
@@ -526,19 +561,32 @@ function Dashboard() {
               <Archive size={14} /> Archiv{muelleimer.length ? ' ('+muelleimer.length+')' : ''}
             </button>
           </div>
+          {suchbegriff.trim() && (
+            <p className="such-hinweis">
+              {sichtbarGefiltert.length + muelleimerGefiltert.length} Treffer für „{suchbegriff.trim()}"
+            </p>
+          )}
           {loading && anfragen.length===0 ? (
             <div className="lade-zustand"><div className="spinner" /><span>Daten laden…</span></div>
           ) : ansicht==='aktiv' ? (
-            <div className="spalten-grid">
-              {SPALTEN.map((status) => (
+            <div className="spalten-grid spalten-grid-4">
+              <StatusSpalte key="Offen-bs" status="Offen" standort="bad-schwartau"
+                anfragen={sichtbarGefiltert.filter((a) => a.status==='Offen' && istBadSchwartauAnfrage(a))}
+                isReadOnly={isReadOnly} currentUser={currentUser} onCardClick={setSelectedAnfrage}
+                onMove={cardMove} onSetSchritt={cardSetSchritt} onWeiterleiten={setWeiterleitenAnfrage} />
+              <StatusSpalte key="Offen-sto" status="Offen" standort="stockelsdorf"
+                anfragen={sichtbarGefiltert.filter((a) => a.status==='Offen' && !istBadSchwartauAnfrage(a))}
+                isReadOnly={isReadOnly} currentUser={currentUser} onCardClick={setSelectedAnfrage}
+                onMove={cardMove} onSetSchritt={cardSetSchritt} onWeiterleiten={setWeiterleitenAnfrage} />
+              {SPALTEN.filter((status) => status !== 'Offen').map((status) => (
                 <StatusSpalte key={status} status={status}
-                  anfragen={sichtbar.filter((a) => a.status===status)}
-                  isReadOnly={isReadOnly} onCardClick={setSelectedAnfrage}
+                  anfragen={sichtbarGefiltert.filter((a) => a.status===status)}
+                  isReadOnly={isReadOnly} currentUser={currentUser} onCardClick={setSelectedAnfrage}
                   onMove={cardMove} onSetSchritt={cardSetSchritt} onWeiterleiten={setWeiterleitenAnfrage} />
               ))}
             </div>
           ) : (
-            <Muelleimer anfragen={muelleimer} isReadOnly={isReadOnly}
+            <Muelleimer anfragen={muelleimerGefiltert} isReadOnly={isReadOnly}
               onCardClick={setSelectedAnfrage} onZurueckholen={zurueckholen} />
           )}
           <UebergabeNotizen notizen={notizen} isReadOnly={isReadOnly} onAdd={addNotiz} onDelete={deleteNotiz} />
@@ -574,7 +622,7 @@ function Dashboard() {
 // ====================================================================
 // Kopfzeile
 // ====================================================================
-function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeute, letzteAenderung, currentUser, setCurrentUser, isReadOnly, onNeu, onRefresh }) {
+function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeute, letzteAenderung, currentUser, setCurrentUser, isReadOnly, suchbegriff, setSuchbegriff, onNeu, onRefresh }) {
   const aenderungsZeit = letzteAenderung ? letzteAenderung.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}) : '—';
   return (
     <div className="kopfzeile">
@@ -592,6 +640,14 @@ function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeut
           )}
         </div>
       </div>
+      <div className="kopf-suche">
+        <Search size={14} />
+        <input type="text" className="such-input" placeholder="Name, Telefon oder E-Mail suchen…"
+          value={suchbegriff} onChange={(e) => setSuchbegriff(e.target.value)} aria-label="Anfragen durchsuchen" />
+        {suchbegriff && (
+          <button type="button" className="such-clear" onClick={() => setSuchbegriff('')} aria-label="Suche leeren"><X size={13} /></button>
+        )}
+      </div>
       <div className="kopf-rechts">
         <span className="kopf-stats">{offeneCount} offen{sofortCount>0 ? ' · '+sofortCount+' sofort' : ''}</span>
         <select className="user-select" aria-label="Benutzer" value={currentUser} onChange={(e) => setCurrentUser(e.target.value)}>
@@ -606,24 +662,31 @@ function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeut
 // ====================================================================
 // StatusSpalte (Box mit farbigem Kopf)
 // ====================================================================
-function StatusSpalte({ status, anfragen, isReadOnly, onCardClick, onMove, onSetSchritt, onWeiterleiten }) {
+function StatusSpalte({ status, standort, anfragen, isReadOnly, currentUser, onCardClick, onMove, onSetSchritt, onWeiterleiten }) {
   const meta = SPALTEN_META[status];
   const istTodoSpalte = status === 'To Do';
   const [todoTab, setTodoTab] = useState(() => localStorage.getItem('todoSpalteTab') || 'todo');
   const zeigtOsteo = istTodoSpalte && todoTab === 'osteo';
+  const zeigtKruse = istTodoSpalte && todoTab === 'kruse';
 
   const wechsleTodoTab = (tab) => {
     setTodoTab(tab);
     try { localStorage.setItem('todoSpalteTab', tab); } catch {}
   };
 
-  const zaehler = zeigtOsteo ? null : anfragen.length;
-  const Icon = zeigtOsteo ? Calendar : meta.icon;
-  const kopfFarbe = zeigtOsteo ? 'var(--osteo)' : meta.farbe;
-  const kopfTitel = zeigtOsteo ? 'Osteo-Termine' : status;
+  // Offen wird in zwei Standort-Spalten aufgeteilt (Bad Schwartau / Stockelsdorf,
+  // s. istBadSchwartauAnfrage). Gleiche Farbe/Icon wie die normale Offen-Spalte,
+  // nur der Titel unterscheidet sich.
+  const zaehler = (zeigtOsteo || zeigtKruse) ? null : anfragen.length;
+  const Icon = zeigtOsteo ? Calendar : zeigtKruse ? FileText : meta.icon;
+  const kopfFarbe = zeigtOsteo ? 'var(--osteo)' : zeigtKruse ? 'var(--kruse)' : meta.farbe;
+  const kopfTitel = zeigtOsteo ? 'Osteo-Termine' : zeigtKruse ? 'Kruse-Anfragen'
+    : standort === 'bad-schwartau' ? 'Offen · Bad Schwartau'
+    : standort === 'stockelsdorf' ? 'Offen · Stockelsdorf'
+    : status;
 
   return (
-    <section className="spalte-box" style={{ background: zeigtOsteo ? 'var(--osteo-hell)' : meta.box, borderColor: zeigtOsteo ? '#c3dade' : meta.rand }}>
+    <section className="spalte-box" style={{ background: zeigtOsteo ? 'var(--osteo-hell)' : zeigtKruse ? 'var(--kruse-hell)' : meta.box, borderColor: zeigtOsteo ? '#c3dade' : zeigtKruse ? '#c9d3e0' : meta.rand }}>
       <div className="spalte-kopf" style={{ background: kopfFarbe }}>
         <span className="spalte-titel"><Icon size={15} /> {kopfTitel}</span>
         {zaehler !== null && <span className="spalte-zaehler" style={{ color: meta.farbe }}>{zaehler}</span>}
@@ -637,11 +700,16 @@ function StatusSpalte({ status, anfragen, isReadOnly, onCardClick, onMove, onSet
           <button className={'spalte-todo-tab' + (todoTab === 'osteo' ? ' aktiv osteo-aktiv' : '')} onClick={() => wechsleTodoTab('osteo')}>
             Osteo-Termine
           </button>
+          <button className={'spalte-todo-tab' + (todoTab === 'kruse' ? ' aktiv kruse-aktiv' : '')} onClick={() => wechsleTodoTab('kruse')}>
+            Kruse-Anfragen
+          </button>
         </div>
       )}
 
       {zeigtOsteo ? (
         <OsteoTermine isReadOnly={isReadOnly} />
+      ) : zeigtKruse ? (
+        <KruseAnfragen isReadOnly={isReadOnly} currentUser={currentUser} />
       ) : (
         <div className="spalte-karten">
           {anfragen.map((a) => (
