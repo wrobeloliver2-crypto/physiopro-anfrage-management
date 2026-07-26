@@ -7,6 +7,7 @@ import {
   CheckCircle2, Frown, CalendarX, Megaphone, Archive,
 } from 'lucide-react';
 import OsteoTermine from './OsteoTermine';
+import KruseAnfragen from './KruseAnfragen';
 
 // ====================================================================
 // Konfiguration
@@ -561,7 +562,7 @@ function Dashboard() {
               {SPALTEN.map((status) => (
                 <StatusSpalte key={status} status={status}
                   anfragen={sichtbarGefiltert.filter((a) => a.status===status)}
-                  isReadOnly={isReadOnly} onCardClick={setSelectedAnfrage}
+                  isReadOnly={isReadOnly} currentUser={currentUser} onCardClick={setSelectedAnfrage}
                   onMove={cardMove} onSetSchritt={cardSetSchritt} onWeiterleiten={setWeiterleitenAnfrage} />
               ))}
             </div>
@@ -642,24 +643,25 @@ function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeut
 // ====================================================================
 // StatusSpalte (Box mit farbigem Kopf)
 // ====================================================================
-function StatusSpalte({ status, anfragen, isReadOnly, onCardClick, onMove, onSetSchritt, onWeiterleiten }) {
+function StatusSpalte({ status, anfragen, isReadOnly, currentUser, onCardClick, onMove, onSetSchritt, onWeiterleiten }) {
   const meta = SPALTEN_META[status];
   const istTodoSpalte = status === 'To Do';
   const [todoTab, setTodoTab] = useState(() => localStorage.getItem('todoSpalteTab') || 'todo');
   const zeigtOsteo = istTodoSpalte && todoTab === 'osteo';
+  const zeigtKruse = istTodoSpalte && todoTab === 'kruse';
 
   const wechsleTodoTab = (tab) => {
     setTodoTab(tab);
     try { localStorage.setItem('todoSpalteTab', tab); } catch {}
   };
 
-  const zaehler = zeigtOsteo ? null : anfragen.length;
-  const Icon = zeigtOsteo ? Calendar : meta.icon;
-  const kopfFarbe = zeigtOsteo ? 'var(--osteo)' : meta.farbe;
-  const kopfTitel = zeigtOsteo ? 'Osteo-Termine' : status;
+  const zaehler = (zeigtOsteo || zeigtKruse) ? null : anfragen.length;
+  const Icon = zeigtOsteo ? Calendar : zeigtKruse ? FileText : meta.icon;
+  const kopfFarbe = zeigtOsteo ? 'var(--osteo)' : zeigtKruse ? 'var(--kruse)' : meta.farbe;
+  const kopfTitel = zeigtOsteo ? 'Osteo-Termine' : zeigtKruse ? 'Kruse-Anfragen' : status;
 
   return (
-    <section className="spalte-box" style={{ background: zeigtOsteo ? 'var(--osteo-hell)' : meta.box, borderColor: zeigtOsteo ? '#c3dade' : meta.rand }}>
+    <section className="spalte-box" style={{ background: zeigtOsteo ? 'var(--osteo-hell)' : zeigtKruse ? 'var(--kruse-hell)' : meta.box, borderColor: zeigtOsteo ? '#c3dade' : zeigtKruse ? '#c9d3e0' : meta.rand }}>
       <div className="spalte-kopf" style={{ background: kopfFarbe }}>
         <span className="spalte-titel"><Icon size={15} /> {kopfTitel}</span>
         {zaehler !== null && <span className="spalte-zaehler" style={{ color: meta.farbe }}>{zaehler}</span>}
@@ -673,11 +675,16 @@ function StatusSpalte({ status, anfragen, isReadOnly, onCardClick, onMove, onSet
           <button className={'spalte-todo-tab' + (todoTab === 'osteo' ? ' aktiv osteo-aktiv' : '')} onClick={() => wechsleTodoTab('osteo')}>
             Osteo-Termine
           </button>
+          <button className={'spalte-todo-tab' + (todoTab === 'kruse' ? ' aktiv kruse-aktiv' : '')} onClick={() => wechsleTodoTab('kruse')}>
+            Kruse-Anfragen
+          </button>
         </div>
       )}
 
       {zeigtOsteo ? (
         <OsteoTermine isReadOnly={isReadOnly} />
+      ) : zeigtKruse ? (
+        <KruseAnfragen isReadOnly={isReadOnly} currentUser={currentUser} />
       ) : (
         <div className="spalte-karten">
           {anfragen.map((a) => (
