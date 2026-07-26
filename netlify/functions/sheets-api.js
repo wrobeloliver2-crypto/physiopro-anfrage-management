@@ -36,6 +36,7 @@ const COLUMNS = [
   'utm_campaign',
   'utm_content',
   'gclid',
+  'dsgvoEinwilligungKruse',
 ];
 
 // ---- Auth (Service Account) ----
@@ -84,7 +85,6 @@ function objectToRow(a) {
     return a[key] !== undefined && a[key] !== null ? String(a[key]) : '';
   });
 }
-
 const jsonResponse = (statusCode, body) => ({
   statusCode,
   headers: {
@@ -112,7 +112,7 @@ exports.handler = async (event) => {
   try {
     const sheets = getSheets();
     const tab = await ersterTabName(sheets, SHEET_ID);
-    const RANGE = tab + '!A2:Y1000';
+    const RANGE = tab + '!A2:Z1000';
 
     // -------------------- READ --------------------
     if (event.httpMethod === 'GET') {
