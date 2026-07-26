@@ -735,6 +735,13 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
         </div>
       )}
 
+      {anfrage.dsgvoEinwilligungKruse && (
+        <div className={'karte-dsgvo-chip ' + (anfrage.dsgvoEinwilligungKruse === 'Ja' ? 'karte-dsgvo-ja' : 'karte-dsgvo-nein')}>
+          {anfrage.dsgvoEinwilligungKruse === 'Ja' ? <CheckCircle2 size={11} /> : <X size={11} />}
+          <span>Einwilligung Datenanforderung (Kruse): {anfrage.dsgvoEinwilligungKruse}</span>
+        </div>
+      )}
+
       {anfrage.notizen && (
         <div className={'karte-notiz'+(istTodo?' notiz-todo':'')}><StickyNote size={11} /> {anfrage.notizen}</div>
       )}
