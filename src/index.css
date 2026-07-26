@@ -35,6 +35,16 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 .neu-btn { background:var(--gruen); color:#fff; border:none; cursor:pointer; padding:9px 16px; border-radius:100px; font-family:var(--sans); font-size:13px; font-weight:500; display:flex; align-items:center; gap:6px; transition:.15s; }
 .neu-btn:hover { background:var(--gruen-dunkel); }
 
+/* ── Generelles Suchfeld (Name / Telefon / E-Mail) ── */
+.kopf-suche { display:flex; align-items:center; gap:7px; background:#fff; border:1px solid var(--beige-mid); border-radius:100px; padding:7px 13px; flex:1 1 220px; max-width:340px; color:var(--grau-hell); transition:.15s; }
+.kopf-suche:focus-within { border-color:var(--gruen); color:var(--gruen); }
+.such-input { flex:1; min-width:0; border:none; background:none; font-family:var(--sans); font-size:12px; color:var(--text); padding:0; }
+.such-input:focus { outline:none; }
+.such-input::placeholder { color:var(--grau-hell); }
+.such-clear { background:none; border:none; cursor:pointer; color:var(--grau-hell); display:flex; padding:0; flex-shrink:0; }
+.such-clear:hover { color:var(--rot); }
+.such-hinweis { font-size:11px; color:var(--grau); margin:-8px 0 12px; }
+
 .fehler-leiste { margin:12px 24px 0; background:#fbeae8; border:1px solid #f0c4bd; color:#a3271c; border-radius:8px; padding:9px 14px; font-size:13px; display:flex; align-items:center; justify-content:space-between; }
 .fehler-leiste button { background:none; border:none; color:#a3271c; text-decoration:underline; cursor:pointer; font-size:13px; }
 
@@ -386,4 +396,3 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 .osteo-confirm-actions button { flex:1; }
 
 .osteo-toast { position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:var(--osteo-dunkel); color:#fff; padding:10px 18px; border-radius:100px; font-size:12px; font-weight:500; box-shadow:0 6px 20px rgba(0,0,0,.2); z-index:1100; }
-
