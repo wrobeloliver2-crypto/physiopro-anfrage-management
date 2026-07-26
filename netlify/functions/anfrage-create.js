@@ -82,6 +82,21 @@ function istPraxisnummer(tel) {
   return PRAXIS_NUMMERN.some((p) => ziffernKern(p) === k);
 }
 
+// ---- DSGVO-Einwilligung (Kruse) aus dem Mailtext ableiten ----
+// Hintergrund: termin.html (Bad Schwartau) schreibt den Einwilligungsstatus
+// zur Datenanforderung bei Frau Thompson explizit als Text
+// "Einwilligung Datenanforderung bei Frau Thompson: JA" bzw. "... NEIN" in
+// die Anfrage. Auf dem Mail-Weg (Flow #1 -> diese Function) kommt dieser
+// Text im Anliegen (oder ggf. in den Notizen) an, wurde bislang aber nicht
+// in Spalte Z (dsgvoEinwilligungKruse) übernommen. Diese Funktion holt ihn
+// dort heraus. Rein additiv: greift nur, wenn der Payload das Feld nicht
+// bereits explizit selbst mitschickt, und beeinflusst keine andere Quelle.
+function parseKruseConsent(text) {
+  const m = /Einwilligung Datenanforderung bei Frau Thompson:\s*(JA|NEIN)/i.exec(String(text || ''));
+  if (!m) return '';
+  return m[1].toUpperCase() === 'JA' ? 'Ja' : 'Nein';
+}
+
 function getSheets() {
   const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT || '{}');
   const auth = new google.auth.GoogleAuth({
@@ -224,6 +239,14 @@ exports.handler = async (event) => {
     } catch (e) { /* History bleibt unverändert, kein harter Fehler */ }
   }
 
+  // ---- DSGVO-Einwilligung (Kruse) bestimmen: expliziter Payload-Wert hat
+  // Vorrang, sonst aus Anliegen bzw. Notizen geparst (s.o.) ----
+  const dsgvoEinwilligungKruse =
+    payload.dsgvoEinwilligungKruse ||
+    parseKruseConsent(payload.anliegen) ||
+    parseKruseConsent(payload.notizen) ||
+    '';
+
   const obj = {
     id: payload.id || ('mail-' + Date.now()),
     eingangsdatum: payload.eingangsdatum || new Date().toISOString().slice(0, 10),
@@ -250,7 +273,7 @@ exports.handler = async (event) => {
     utm_campaign: payload.utm_campaign || '', // W
     utm_content:  payload.utm_content  || '', // X
     gclid:        payload.gclid        || '', // Y
-    dsgvoEinwilligungKruse: payload.dsgvoEinwilligungKruse || '', // Z
+    dsgvoEinwilligungKruse, // Z
   };
 
   const row = COLUMNS.map((k) => (obj[k] !== undefined && obj[k] !== null ? String(obj[k]) : ''));
