@@ -1,11 +1,15 @@
 // Gemeinsame Helfer für die Kruse-Datenanforderungen-Functions
 // (kruse-list-anfragen, kruse-update-status).
 //
-// Nutzt bewusst dieselben Zugangsdaten wie kruse-consent-log.js im
-// physiopro-website-Repo (KRUSE_GOOGLE_CLIENT_EMAIL / KRUSE_GOOGLE_PRIVATE_KEY,
-// beide hier als Kopie hinterlegt), statt des GOOGLE_SERVICE_ACCOUNT dieses
-// Repos — so ist keine zusätzliche Google-Drive-Freigabe des Kruse-Sheets
-// nötig, es bleibt bei genau einem Schreib-Account für dieses Sheet.
+// Nutzt das bereits vorhandene GOOGLE_SERVICE_ACCOUNT dieses Repos (dieselbe
+// JSON-Credential wie sheets-api.js) statt eigener KRUSE_GOOGLE_CLIENT_EMAIL /
+// KRUSE_GOOGLE_PRIVATE_KEY-Variablen. Grund: Netlify/AWS Lambda begrenzt die
+// Umgebungsvariablen einer Function auf 4 KB in diesem Kompatibilitätsmodus;
+// ein zweiter kompletter Private-Key hätte dieses Limit gesprengt (siehe
+// _osteo-lib.js, das aus demselben Grund GOOGLE_SERVICE_ACCOUNT mitnutzt statt
+// eigener OSTEO_GOOGLE_*-Variablen). Der Service-Account
+// physiopro-anfrage@physiopro-anfrage-tool.iam.gserviceaccount.com wurde dafür
+// als Bearbeiter auf beiden Kruse-Sheets (TEST + PROD) freigegeben.
 //
 // Hinweis: .cjs statt .js, weil package.json "type":"module" setzt — als
 // .js würde Node diese CommonJS-Datei (require/module.exports) als ES-Modul
@@ -22,15 +26,16 @@ const HEADERS = [
   'id', 'status', 'bearbeiter', 'angefordertAm', 'notizen', 'history',
 ];
 
+function getAuth() {
+  const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT || '{}');
+  return new google.auth.GoogleAuth({
+    credentials,
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  });
+}
+
 async function getSheetsClient() {
-  const auth = new google.auth.JWT(
-    process.env.KRUSE_GOOGLE_CLIENT_EMAIL,
-    null,
-    (process.env.KRUSE_GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
-    ['https://www.googleapis.com/auth/spreadsheets']
-  );
-  await auth.authorize();
-  return google.sheets({ version: 'v4', auth });
+  return google.sheets({ version: 'v4', auth: getAuth() });
 }
 
 // Liest alle Fälle. Leere Zeilen (weder Name noch id) werden übersprungen.

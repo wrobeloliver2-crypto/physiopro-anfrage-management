@@ -10,8 +10,8 @@ exports.handler = async (event) => {
   if (!process.env.KRUSE_SHEET_ID) {
     return resp(500, { error: 'Server nicht konfiguriert (KRUSE_SHEET_ID fehlt)' });
   }
-  if (!process.env.KRUSE_GOOGLE_CLIENT_EMAIL || !process.env.KRUSE_GOOGLE_PRIVATE_KEY) {
-    return resp(500, { error: 'Server nicht konfiguriert (KRUSE_GOOGLE_CLIENT_EMAIL/KRUSE_GOOGLE_PRIVATE_KEY fehlt)' });
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT) {
+    return resp(500, { error: 'Server nicht konfiguriert (GOOGLE_SERVICE_ACCOUNT fehlt)' });
   }
 
   try {
