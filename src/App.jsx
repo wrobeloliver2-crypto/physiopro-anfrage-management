@@ -422,9 +422,17 @@ function Dashboard() {
     // zuerst den Terminbestätigungs-Entwurf anbieten. Die Karte bleibt vorerst
     // unverändert; erst die DraftModal-Aktion entscheidet, wohin sie geht
     // (To Do „Bestätigung senden" bei Erfolg, direkt Erledigt bei „Keine E-Mail").
-    // Greift nur beim ERSTEN Mal: hängt die Karte schon in der Bestätigungs-Schleife,
-    // ist dieser Klick die Bestätigung „ist versendet" → normal abschließen.
-    const schonInBestaetigung = anfrage.status === 'To Do' && BESTAETIGUNG_SCHRITTE.includes(anfrage.schritt);
+    // Greift nur, solange der Entwurf noch nicht wirklich erstellt wurde: ob das
+    // der Fall ist, wird — wie bei bestaetigungGesendet()/UI-Hinweis weiter unten —
+    // aus der History abgeleitet (Eintrag "... (Entwurf in Outlook erstellt)"),
+    // NICHT nur aus Status/Schritt. Grund: Termin oder E-Mail werden regelmäßig
+    // nachträglich erfasst (Karte landet z. B. per manueller Bearbeitung oder über
+    // das Schritt-Dropdown in "To Do/Bestätigung senden", ohne dass je ein Entwurf
+    // erstellt wurde). Verließe man sich nur auf Status+Schritt, würde der nächste
+    // "Erledigt"-Klick die Karte fälschlich als "schon versendet" archivieren, ohne
+    // dass je eine Bestätigung erstellt wurde — genau das mit reiner
+    // Status/Schritt-Prüfung nicht mehr unterscheidbare Bug-Szenario.
+    const schonInBestaetigung = bestaetigungGesendet(anfrage);
     if (istTerminErgebnis(ergebnis) && anfrage.email && anfrage.email.trim() && !schonInBestaetigung) {
       setErgebnisAnfrage(null); setSelectedAnfrage(null);
       setMailtoAnfrage({ anfrage: { ...anfrage, ergebnis }, ergebnis });
