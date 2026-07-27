@@ -59,14 +59,14 @@ function buildHtml({ name, behandlung }) {
       <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 2px 14px rgba(85,114,94,.10);">
         <!-- Kopf -->
         <tr><td style="background:${gruen};padding:30px 36px;">
-          <h1 style="margin:0;font-family:'Georgia','Cormorant Garamond',serif;font-size:24px;font-weight:600;color:#ffffff;letter-spacing:.3px;">PhysioPro Lübeck</h1>
+          <h1 style="margin:0;font-family:'Georgia','Cormorant Garamond',serif;font-size:24px;font-weight:600;color:#ffffff;letter-spacing:.3px;">PhysioPro</h1>
           <p style="margin:6px 0 0;font-size:13px;color:#d6e2db;">Physiotherapie &amp; Osteopathie</p>
         </td></tr>
         <!-- Inhalt -->
         <tr><td style="padding:34px 36px 12px;">
           <p style="margin:0 0 18px;font-size:16px;">Liebe/r ${name},</p>
           <p style="margin:0 0 18px;font-size:15px;line-height:1.6;color:${text};">
-            vielen Dank für Ihre Anfrage bei PhysioPro Lübeck.
+            vielen Dank für Ihre Anfrage bei PhysioPro.
           </p>
           <p style="margin:0 0 22px;font-size:15px;line-height:1.6;color:${text};">
             wir freuen uns sehr, dass wir gemeinsam so schnell einen passenden Termin für Sie finden konnten.
@@ -89,8 +89,8 @@ function buildHtml({ name, behandlung }) {
         <!-- Fuß -->
         <tr><td style="background:${gruenHell};padding:20px 36px;border-top:1px solid #dde8e0;">
           <p style="margin:0;font-size:12px;line-height:1.7;color:${grau};">
-            <strong style="color:${gruen};">PhysioPro Lübeck</strong><br>
-            Tel: 0451 – 400 430 70<br>
+            <strong style="color:${gruen};">PhysioPro</strong><br>
+            Tel: 0451 – 400 730 73<br>
             <a href="mailto:info@physioproluebeck.de" style="color:${gruen};text-decoration:none;">info@physioproluebeck.de</a><br>
             <a href="https://www.physioproluebeck.de" style="color:${gruen};text-decoration:none;">www.physioproluebeck.de</a>
           </p>
@@ -131,7 +131,7 @@ exports.handler = async (event) => {
 
     // Entwurf-Objekt
     const message = {
-      subject: 'Ihre Terminbestätigung – PhysioPro Lübeck',
+      subject: 'Ihre Terminbestätigung – PhysioPro',
       body: {
         contentType: 'HTML',
         content: buildHtml({ name: empfaengerName, behandlung: fach }),
