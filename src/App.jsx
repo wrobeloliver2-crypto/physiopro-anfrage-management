@@ -59,6 +59,7 @@ const ERGEBNIS_GRUPPEN = [
     'Kein freier Termin – Warteliste angeboten',
     'Außerhalb Versorgungsbereich',
     'Weiterverwiesen an andere Praxis',
+    'Falsche Praxis angerufen',
   ]},
   { titel: 'Sonstiges', optionen: [
     'Frage zur Behandlung',
@@ -69,7 +70,7 @@ const ERGEBNIS_GRUPPEN = [
 ];
 const ALLE_ERGEBNISSE = ERGEBNIS_GRUPPEN.flatMap((g) => g.optionen);
 // Optionen, die im Popup einen "neu"-Chip bekommen. Zum Entfernen: Set leeren ( new Set() ).
-const NEUE_ERGEBNISSE = new Set(['Frage zur Behandlung', 'Frage zu bestehendem Termin']);
+const NEUE_ERGEBNISSE = new Set(['Frage zur Behandlung', 'Frage zu bestehendem Termin', 'Falsche Praxis angerufen']);
 const istTerminErgebnis = (e) => typeof e === 'string' && e.startsWith('Termin vereinbart');
 const istAbsage = (e) => typeof e === 'string' && e.startsWith('Terminabsage');
 // Diese Absage-Option schließt NICHT ab, sondern erzwingt erst "Ausfallrechnung schreiben" (To Do).
