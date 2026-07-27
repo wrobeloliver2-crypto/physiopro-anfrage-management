@@ -226,12 +226,20 @@ function suchtreffer(a, suchbegriff) {
 // ---- Standort-Erkennung: Offen-Spalte nach Bad Schwartau / Stockelsdorf ----
 // Bad-Schwartau-Anfragen tragen "Standort: Bad Schwartau" im Anliegen-Text
 // (gesetzt in termin.html, kommt über den Mail-Weg -> anfrage-create.js so
-// im Sheet an). Alles andere (Hauptstandort Lübeck, ab sofort intern als
-// "Stockelsdorf" bezeichnet, sowie jede nicht eindeutig zuordenbare Anfrage)
-// landet automatisch im Stockelsdorf-Bereich -- das ist der gewünschte
-// Fallback, es gibt keine dritte/unklare Kategorie.
+// im Sheet an) -- das ist der eindeutige, bevorzugte Treffer.
+// Fallback (seit 27.07.2026): manuell erfasste oder telefonische Anfragen
+// tragen dieses feste Tag nicht, können aber trotzdem "Bad Schwartau" im
+// Freitext stehen haben (z. B. "Patientin aus Bad Schwartau ..."). Steht die
+// Wortfolge "Bad Schwartau" (unabhängig von Groß-/Kleinschreibung und Anzahl
+// Leerzeichen) irgendwo im Anliegen-Text, gilt das ebenfalls als eindeutiger
+// Hinweis auf den Standort Bad Schwartau. Nur wenn wirklich kein Hinweis
+// vorhanden ist, landet die Anfrage weiterhin automatisch im
+// Stockelsdorf-Fallback (Hauptstandort Lübeck) -- es gibt keine dritte/
+// unklare Kategorie.
 function istBadSchwartauAnfrage(a) {
-  return (a.anliegen || '').includes('Standort: Bad Schwartau');
+  const text = a.anliegen || '';
+  if (text.includes('Standort: Bad Schwartau')) return true;
+  return /bad\s+schwartau/i.test(text);
 }
 
 // ====================================================================
