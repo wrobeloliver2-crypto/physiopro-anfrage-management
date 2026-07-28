@@ -37,6 +37,12 @@ const SCHRITTE_HAENGT = ['Angerufen – niemand erreicht', 'Wartet auf Rezept/Un
 const SCHRITT_BESTAETIGUNG = 'Bestätigung senden';
 const BESTAETIGUNG_SCHRITTE = [SCHRITT_BESTAETIGUNG];
 
+// Behandlungsarten, wählbar wenn ein Entwurf ohne feststehendes Ergebnis
+// erstellt wird (Button "Entwurf erstellen" im AnfragenModal). Bei Entwürfen
+// aus dem regulären Erledigt-Flow wird die Behandlungsart weiterhin aus dem
+// Ergebnis-String abgeleitet (siehe DraftModal).
+const BEHANDLUNGSARTEN = ['Physiotherapie', 'Osteopathie', 'Physiocoaching'];
+
 // Ergebnis-Optionen (Pflicht beim Abschließen). Gruppiert für das Erledigt-Popup.
 const ERGEBNIS_GRUPPEN = [
   { titel: 'Termin vereinbart', primaer: true, optionen: [
@@ -257,6 +263,7 @@ function Dashboard() {
   const [weiterleitenAnfrage, setWeiterleitenAnfrage] = useState(null);
   const [ergebnisAnfrage, setErgebnisAnfrage] = useState(null);
   const [mailtoAnfrage, setMailtoAnfrage] = useState(null); // { anfrage, ergebnis } für E-Mail-Modal
+  const [draftOhneErgebnisAnfrage, setDraftOhneErgebnisAnfrage] = useState(null); // Anfrage, für die "Entwurf erstellen" (ohne Ergebnis) offen ist
   const [error, setError] = useState(null);
   const [letzteAenderung, setLetzteAenderung] = useState(null);
   const [ansicht, setAnsicht] = useState('aktiv'); // 'aktiv' | 'muelleimer'
@@ -466,6 +473,22 @@ function Dashboard() {
     } : a));
     setMailtoAnfrage(null); setSelectedAnfrage(null);
   };
+  // Erfolg aus dem "Entwurf erstellen"-Button im AnfragenModal (KEIN Ergebnis
+  // festgelegt — das Ergebnis der Anfrage steht noch nicht fest, es wurde nur
+  // eine vorbereitende Mail als Entwurf angelegt). Karte wandert wie beim
+  // regulären Terminbestätigungs-Flow nach To Do / "Bestätigung senden", damit
+  // sie sichtbar bleibt, bis die Mail tatsächlich versendet wurde — aber ohne
+  // anfrage.ergebnis zu setzen. Der nächste "Erledigt"-Klick öffnet daher ganz
+  // regulär das ErgebnisModal (siehe cardMove/cardErledigt), weil kein Ergebnis
+  // vorliegt — genau das gewünschte Verhalten.
+  const draftErfolgOhneErgebnis = (anfrage) => {
+    persist(anfragen.map((a) => a.id===anfrage.id ? {
+      ...a, ...anfrage, status: 'To Do', schritt: SCHRITT_BESTAETIGUNG,
+      bearbeiter: (anfrage.bearbeiter && anfrage.bearbeiter!=='Unzugewiesen') ? anfrage.bearbeiter : currentUser,
+      history:[...(anfrage.history || a.history || []), historyEintrag('Schritt', currentUser, SCHRITT_BESTAETIGUNG+' (Entwurf in Outlook erstellt)')]
+    } : a));
+    setDraftOhneErgebnisAnfrage(null); setSelectedAnfrage(null);
+  };
   const cardSetSchritt = (anfrage, schritt) => {
     persist(anfragen.map((a) => a.id===anfrage.id ? { ...a, schritt, history:[...a.history, historyEintrag('Schritt', currentUser, schritt)] } : a));
   };
@@ -614,7 +637,8 @@ function Dashboard() {
           <AnfragenModal anfrage={selectedAnfrage} isReadOnly={isReadOnly}
             onClose={() => setSelectedAnfrage(null)} onSave={updateAnfrage}
             onStatusChange={(a,s) => cardMove(a,s)} onDelete={deleteAnfrage}
-            onWeiterleiten={() => setWeiterleitenAnfrage(selectedAnfrage)} />
+            onWeiterleiten={() => setWeiterleitenAnfrage(selectedAnfrage)}
+            onEntwurfErstellen={() => setDraftOhneErgebnisAnfrage(selectedAnfrage)} />
         )}
         {weiterleitenAnfrage && (
           <WeiterleitenModal anfrage={weiterleitenAnfrage} onClose={() => setWeiterleitenAnfrage(null)} onConfirm={weiterleiten} />
@@ -628,6 +652,12 @@ function Dashboard() {
             onKeineEmail={() => draftKeineEmail(mailtoAnfrage.anfrage, mailtoAnfrage.ergebnis)}
             onClose={() => setMailtoAnfrage(null)}
             onBack={() => { setMailtoAnfrage(null); setSelectedAnfrage(mailtoAnfrage.anfrage); }} />
+        )}
+        {draftOhneErgebnisAnfrage && (
+          <DraftModal anfrage={draftOhneErgebnisAnfrage} ergebnis={null}
+            onErfolg={() => draftErfolgOhneErgebnis(draftOhneErgebnisAnfrage)}
+            onClose={() => setDraftOhneErgebnisAnfrage(null)}
+            onBack={() => { const a = draftOhneErgebnisAnfrage; setDraftOhneErgebnisAnfrage(null); setSelectedAnfrage(a); }} />
         )}
         {showNewForm && !isReadOnly && (
           <NeueAnfrageForm onClose={() => setShowNewForm(false)} onSubmit={addAnfrage} onMerge={mergeAnfrage} checkDuplicate={checkDuplicate} />
@@ -991,15 +1021,24 @@ function WeiterleitenModal({ anfrage, onClose, onConfirm }) {
 // ====================================================================
 // DraftModal — Outlook-Entwurf mit HTML-Mail + PDF-Anhang erstellen
 // ====================================================================
+// "ergebnis" ist optional: kommt der Aufruf aus dem regulären Erledigt-Flow
+// (Ergebnis "Termin vereinbart – …" steht schon fest), wird die Behandlungsart
+// daraus abgeleitet und ist nicht änderbar. Kommt der Aufruf über den
+// "Entwurf erstellen"-Button im AnfragenModal — also BEVOR ein Ergebnis
+// feststeht — ist ergebnis null/undefined, und die Behandlungsart wird
+// stattdessen über ein Dropdown abgefragt (Vorbelegung: Physiotherapie).
 function DraftModal({ anfrage, ergebnis, onClose, onBack, onErfolg, onKeineEmail }) {
   const [pdfDatei, setPdfDatei] = useState(null);   // { name, base64 }
   const [status, setStatus] = useState('idle');     // idle | sende | ok | fehler
   const [fehler, setFehler] = useState('');
+  const ergebnisFest = !!ergebnis;
+  const [behandlungWahl, setBehandlungWahl] = useState('Physiotherapie');
 
-  // Behandlungsart aus dem Ergebnis ableiten
-  const behandlung = ergebnis.includes('Osteopathie') ? 'Osteopathie'
-    : ergebnis.includes('Physiocoaching') ? 'Physiocoaching'
-    : 'Physiotherapie';
+  // Behandlungsart: bei feststehendem Ergebnis aus dem Ergebnis-String
+  // ableiten (wie bisher), sonst aus der Dropdown-Auswahl.
+  const behandlung = ergebnisFest
+    ? (ergebnis.includes('Osteopathie') ? 'Osteopathie' : ergebnis.includes('Physiocoaching') ? 'Physiocoaching' : 'Physiotherapie')
+    : behandlungWahl;
 
   const onPdfWahl = (e) => {
     const f = e.target.files && e.target.files[0];
@@ -1079,14 +1118,34 @@ function DraftModal({ anfrage, ergebnis, onClose, onBack, onErfolg, onKeineEmail
     <div className="modal-overlay">
       <div className="modal modal-schmal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-kopf modal-kopf-gruen">
-          <h2><Mail size={17} style={{ verticalAlign:'-3px', marginRight:6 }} /> Terminbestätigung als Outlook-Entwurf</h2>
+          <h2><Mail size={17} style={{ verticalAlign:'-3px', marginRight:6 }} /> {ergebnisFest ? 'Terminbestätigung' : 'Mail-Entwurf'} als Outlook-Entwurf</h2>
         </div>
         <div className="modal-body">
           <p className="erg-name">{anfrage.name}</p>
-          <p style={{ fontSize:'0.875rem', color:'var(--grau)', margin:'0 0 4px' }}>HTML-E-Mail ({behandlung}) an</p>
-          <p style={{ fontSize:'0.9rem', fontWeight:600, color:'var(--text)', margin:'0 0 18px', wordBreak:'break-all' }}>
-            {anfrage.email}
-          </p>
+          {ergebnisFest ? (
+            <>
+              <p style={{ fontSize:'0.875rem', color:'var(--grau)', margin:'0 0 4px' }}>HTML-E-Mail ({behandlung}) an</p>
+              <p style={{ fontSize:'0.9rem', fontWeight:600, color:'var(--text)', margin:'0 0 18px', wordBreak:'break-all' }}>
+                {anfrage.email}
+              </p>
+            </>
+          ) : (
+            <>
+              <p style={{ fontSize:'0.875rem', color:'var(--grau)', margin:'0 0 4px' }}>HTML-E-Mail an</p>
+              <p style={{ fontSize:'0.9rem', fontWeight:600, color:'var(--text)', margin:'0 0 14px', wordBreak:'break-all' }}>
+                {anfrage.email}
+              </p>
+              <div className="feld" style={{ marginBottom: 14 }}>
+                <label>Behandlungsart</label>
+                <select value={behandlungWahl} onChange={(e) => setBehandlungWahl(e.target.value)} disabled={sendet}>
+                  {BEHANDLUNGSARTEN.map((b) => <option key={b} value={b}>{b}</option>)}
+                </select>
+              </div>
+              <p style={{ fontSize:'0.8rem', color:'var(--grau)', margin:'0 0 14px' }}>
+                Das Ergebnis der Anfrage (Termin vereinbart, kein Interesse, …) legst du erst beim Abschließen der Karte fest — hier wird nur die Mail vorbereitet.
+              </p>
+            </>
+          )}
 
           <label className="draft-pdf-feld">
             <input type="file" accept="application/pdf" onChange={onPdfWahl} disabled={sendet} hidden />
@@ -1102,11 +1161,13 @@ function DraftModal({ anfrage, ergebnis, onClose, onBack, onErfolg, onKeineEmail
 
           {fehler && <p className="draft-fehler">{fehler}</p>}
         </div>
-        <div className="modal-fuss modal-fuss-3">
+        <div className={'modal-fuss'+(ergebnisFest ? ' modal-fuss-3' : '')}>
           <button className="zurueck-btn" onClick={onBack} disabled={sendet}>
             <ArrowLeft size={15} /> Zurück
           </button>
-          <button className="abbrechen-btn" onClick={onKeineEmail} disabled={sendet}>Keine E-Mail</button>
+          {ergebnisFest && (
+            <button className="abbrechen-btn" onClick={onKeineEmail} disabled={sendet}>Keine E-Mail</button>
+          )}
           <button className="speichern-btn" onClick={entwurfErstellen} disabled={sendet}
             style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
             {sendet ? <><Hourglass size={15} /> Erstelle…</> : status === 'fehler' ? <><Mail size={15} /> Nochmal versuchen</> : <><Mail size={15} /> Entwurf erstellen</>}
@@ -1186,11 +1247,16 @@ function ErgebnisModal({ anfrage, onClose, onConfirm }) {
 // ====================================================================
 // AnfragenModal (Detail / Edit)
 // ====================================================================
-function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, onDelete, onWeiterleiten }) {
+function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, onDelete, onWeiterleiten, onEntwurfErstellen }) {
   const [form, setForm] = useState({ ...anfrage });
   const [showHistory, setShowHistory] = useState(false);
   const set = (k,v) => setForm((f) => ({ ...f, [k]: v }));
   const schritte = form.status==='To Do' ? SCHRITTE_HAENGT : SCHRITTE_AKTIV;
+  // "Entwurf erstellen"-Button: nur sinnvoll, solange eine E-Mail-Adresse
+  // hinterlegt ist und noch kein Entwurf für diese Karte erstellt wurde
+  // (danach übernimmt der reguläre "Bestätigung senden"-Schritt/-Hinweis).
+  const emailVorhanden = !!(anfrage.email && anfrage.email.trim());
+  const zeigtEntwurfButton = !isReadOnly && emailVorhanden && !bestaetigungGesendet(anfrage);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -1317,6 +1383,9 @@ function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, o
           <div className="modal-fuss">
             <button className="loeschen-btn" onClick={() => onDelete(anfrage)}><Trash2 size={14} /> Löschen</button>
             <div className="fuss-rechts">
+              {zeigtEntwurfButton && (
+                <button className="wl-btn" title="Mail-Entwurf in Outlook vorbereiten" onClick={onEntwurfErstellen}><Mail size={14} /> Entwurf erstellen</button>
+              )}
               <button className="wl-btn" onClick={onWeiterleiten}><Send size={14} /> Weiterleiten</button>
               <button className="speichern-btn" onClick={() => onSave(form)}>Speichern</button>
             </div>
