@@ -216,6 +216,39 @@ function normalizeTelefon(roh) {
   return '+' + n;
 }
 
+// ---- Anliegen fürs Dashboard bereinigen (leere Utm-/Gclid-Label-Reste) ----
+// Hintergrund (gefunden 29.07.2026, Bug-Report Oliver zu /privat-versichert):
+// Das gemeinsam genutzte Netlify-Formular "termin" hat auf manchen Seiten
+// (index.html, bad-schwartau.html) zusätzliche Felder utm_source/utm_medium/
+// utm_campaign/utm_content/gclid, auf anderen (termin.html, privat-versichert
+// über termin.html) nicht. Weil Netlify Formulare seitenübergreifend nach
+// Namen zusammenführt, tauchen diese fünf Feld-Labels in der Notification-Mail
+// auch dann auf, wenn eine konkrete Anfrage sie gar nicht mitgeschickt hat -
+// und Power-Automate Flow #1 hängt beim Extrahieren des "Anliegen"-Felds
+// (Format B, Website) bislang ungefiltert alles nach dem "Message:"-Marker an,
+// inklusive dieser leeren Labels. Ergebnis: Text wie "...Testanfrage Utm
+// Source: Utm Medium: Utm Campaign: Utm Content: Gclid:" im Anliegen-Feld.
+// Diese Funktion entfernt einen rein leeren Label-Schwanz am Ende der Anzeige.
+// Sie behebt NICHT die eigentliche Ursache (die liegt im Power-Automate-Flow,
+// siehe docs/power-automate-flow1.md) - nur die Anzeige im Dashboard.
+const UTM_TAIL_LABELS = ['Gclid', 'Utm Content', 'Utm Campaign', 'Utm Medium', 'Utm Source'];
+function bereinigeAnliegen(text) {
+  if (!text) return text;
+  let out = String(text);
+  let geaendert = true;
+  while (geaendert) {
+    geaendert = false;
+    for (const label of UTM_TAIL_LABELS) {
+      const re = new RegExp('\\s*' + label.replace(' ', '\\s+') + ':\\s*$', 'i');
+      if (re.test(out)) {
+        out = out.replace(re, '');
+        geaendert = true;
+      }
+    }
+  }
+  return out;
+}
+
 // ---- Generelles Suchfeld: Treffer auf Name, Telefon, E-Mail ----
 // Telefon wird über Ziffern verglichen (normalizeTelefon-Ziffernkern), damit
 // "0451...", "+49451..." und "0049451..." alle als derselbe Treffer zählen.
@@ -804,7 +837,7 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
         {istTodo ? <AlertTriangle size={12} color="#b8742a" />
           : <span className="karte-prio" style={{ color:prio.text, background:prio.bg }}>{anfrage.prioritaet}</span>}
       </div>
-      <p className="karte-anliegen">{anfrage.anliegen}</p>
+      <p className="karte-anliegen">{bereinigeAnliegen(anfrage.anliegen)}</p>
 
       {(istBearb || istTodo) && (
         <div className="karte-schritt-zeile" onClick={(e) => e.stopPropagation()}>
@@ -1272,6 +1305,7 @@ function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, o
         </div>
         <div className="modal-body">
           <div className="info-grid">
+            <InfoCard icon={<User size={14} />} label="Name" value={anfrage.name || '-'} />
             <InfoCard icon={<Calendar size={14} />} label="Eingang" value={anfrage.eingangsdatum} />
             <InfoCard icon={<Phone size={14} />} label="Telefon" value={anfrage.telefon || '-'} />
             {isReadOnly
@@ -1291,7 +1325,7 @@ function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, o
           </div>
           <div className="feld">
             <label>Anliegen</label>
-            {isReadOnly ? <p className="feld-wert">{anfrage.anliegen}</p>
+            {isReadOnly ? <p className="feld-wert">{bereinigeAnliegen(anfrage.anliegen)}</p>
               : <textarea value={form.anliegen} onChange={(e) => set('anliegen', e.target.value)} rows={2} />}
           </div>
           <div className="feld">
