@@ -173,7 +173,7 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 
 .feld { display:flex; flex-direction:column; gap:4px; flex:1; }
 .feld label { font-size:11px; font-weight:500; color:var(--grau); }
-.feld-wert { font-size:13px; color:var(--text); padding:2px 0; }
+.feld-wert { font-size:13px; color:var(--text); padding:2px 0; white-space:pre-line; }
 .feld-reihe { display:flex; gap:12px; }
 .feld input, .feld textarea, .feld select { font-family:var(--sans); font-size:13px; color:var(--text); border:1px solid var(--beige-mid); border-radius:7px; padding:8px 10px; background:#fff; width:100%; }
 .feld input:focus, .feld textarea:focus, .feld select:focus { outline:none; border-color:var(--gruen); }
