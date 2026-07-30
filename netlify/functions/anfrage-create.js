@@ -112,6 +112,26 @@ function istPrivatVersichertAnfrage(anliegen) {
   return /Herkunft:\s*\/privat-versichert/i.test(String(anliegen || ''));
 }
 
+// ---- Priorität "Niedrig" für Terminabsagen erzwingen (alle Kanäle) ----
+// Hintergrund (Oliver, 30.07.2026): Terminabsagen sollen unabhängig vom
+// Eingangskanal (Telefon-KI/Placetel, Netlify-Webformular, SMS-Rückruf,
+// manuell erfasst) automatisch mit Priorität "Niedrig" ins Dashboard
+// kommen, weil sie in der Regel keine dringende Bearbeitung brauchen.
+// Erkennung bewusst NUR über das feste Schlüsselwort "Terminabsage"
+// (deckt alle bisher beobachteten echten Formulierungen ab, siehe u.a.
+// Telefon-KI-Texte wie "Terminabsage für den ... Uhr" oder "Terminabsage,
+// Termin am ..."), NICHT über freiere Formulierungsmuster ("möchte
+// absagen", "kann nicht kommen" o.ä.) — solche Muster ließen sich nicht
+// zuverlässig von ähnlich klingenden, aber anderen Anliegen abgrenzen
+// (Entscheidung von Oliver: robuste Erkennung über Perfektion gestellt).
+// Rangfolge: Falls sowohl Terminabsage ALS AUCH /privat-versichert
+// zutreffen (siehe istPrivatVersichertAnfrage), hat "Niedrig" Vorrang vor
+// "Sofort" — die Terminabsage-Prüfung wird deshalb an der Anwendungsstelle
+// bewusst ALS LETZTES ausgewertet.
+function istTerminabsage(anliegen) {
+  return /termin\s*absage/i.test(String(anliegen || ''));
+}
+
 function getSheets() {
   const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT || '{}');
   const auth = new google.auth.GoogleAuth({
@@ -262,9 +282,12 @@ exports.handler = async (event) => {
     parseKruseConsent(payload.notizen) ||
     '';
 
-  const prioritaetFinal = istPrivatVersichertAnfrage(payload.anliegen)
+  const prioritaetVorPruefung = istPrivatVersichertAnfrage(payload.anliegen)
     ? 'Sofort'
     : (payload.prioritaet || 'Normal');
+  const prioritaetFinal = istTerminabsage(payload.anliegen)
+    ? 'Niedrig'
+    : prioritaetVorPruefung;
 
   const obj = {
     id: payload.id || ('mail-' + Date.now()),
