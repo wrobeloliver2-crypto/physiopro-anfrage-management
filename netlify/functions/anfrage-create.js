@@ -97,6 +97,21 @@ function parseKruseConsent(text) {
   return m[1].toUpperCase() === 'JA' ? 'Ja' : 'Nein';
 }
 
+// ---- Priorität "Sofort" für Anfragen über /privat-versichert erzwingen ----
+// Hintergrund (Oliver, 30.07.2026): Anfragen über die Landingpage
+// physioproluebeck.de/privat-versichert sollen automatisch mit Priorität
+// "Sofort" ins Dashboard kommen, unabhängig davon, was Flow #1 im Payload
+// mitschickt. Erkennungsmerkmal ist der feste Text "Herkunft: /privat-
+// versichert", den privat-versichert.html jeder Nachricht anhängt (siehe
+// pvSubmit() in privat-versichert.html, Repo physiopro-website). Bewusst
+// als eigene erzwingende Regel NACH dem generischen Payload-Fallback
+// (payload.prioritaet || 'Normal') angewendet, nicht als weiterer Fallback-
+// Wert selbst — soll auch dann greifen, wenn der Flow versehentlich schon
+// "Normal" oder einen anderen Wert mitschickt.
+function istPrivatVersichertAnfrage(anliegen) {
+  return /Herkunft:\s*\/privat-versichert/i.test(String(anliegen || ''));
+}
+
 function getSheets() {
   const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT || '{}');
   const auth = new google.auth.GoogleAuth({
@@ -247,6 +262,10 @@ exports.handler = async (event) => {
     parseKruseConsent(payload.notizen) ||
     '';
 
+  const prioritaetFinal = istPrivatVersichertAnfrage(payload.anliegen)
+    ? 'Sofort'
+    : (payload.prioritaet || 'Normal');
+
   const obj = {
     id: payload.id || ('mail-' + Date.now()),
     eingangsdatum: payload.eingangsdatum || new Date().toISOString().slice(0, 10),
@@ -255,7 +274,7 @@ exports.handler = async (event) => {
     telefon: telFinal,
     email: payload.email || '',
     anliegen: (payload.anliegen || '') + (telIstPraxis ? ' ⚠️ Rückrufnummer fehlt (Praxisnummer übergeben – bitte beim Patienten erfragen)' : ''),
-    prioritaet: payload.prioritaet || 'Normal',
+    prioritaet: prioritaetFinal,
     status: 'Offen',           // immer Offen bei Neuanlage
     bearbeiter: 'Unzugewiesen', // immer Unzugewiesen bei Neuanlage
     followupDatum: payload.followupDatum || '',
