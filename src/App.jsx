@@ -469,7 +469,7 @@ function Dashboard() {
     // NICHT nur aus Status/Schritt. Grund: Termin oder E-Mail werden regelmäßig
     // nachträglich erfasst (Karte landet z. B. per manueller Bearbeitung oder über
     // das Schritt-Dropdown in "To Do/Bestätigung senden", ohne dass je ein Entwurf
-    // erstellt wurde). Verließe man sich nur auf Status/Schritt-Prüfung, würde der nächste
+    // erstellt wurde). Verließe man sich nur auf Status+Schritt, würde der nächste
     // "Erledigt"-Klick die Karte fälschlich als "schon versendet" archivieren, ohne
     // dass je eine Bestätigung erstellt wurde — genau das mit reiner
     // Status/Schritt-Prüfung nicht mehr unterscheidbare Bug-Szenario.
