@@ -4,7 +4,7 @@ import {
   X, Trash2, Calendar, User, Globe, Check, RefreshCw, StickyNote,
   PhoneCall, Pin, ArrowRight, ArrowLeft, Send, Inbox, UserCheck,
   Search, FileText, PhoneOff, CalendarCheck, Hourglass, RotateCcw,
-  CheckCircle2, Frown, CalendarX, Megaphone, Archive,
+  CheckCircle2, Frown, CalendarX, Megaphone, Archive, MapPin,
 } from 'lucide-react';
 import OsteoTermine from './OsteoTermine';
 import KruseAnfragen from './KruseAnfragen';
@@ -832,6 +832,9 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
       {sofortUeberfaellig && (
         <div className="karte-sofort-banner"><AlertTriangle size={12} /> Überfällig</div>
       )}
+      <div className="karte-standort">
+        <MapPin size={11} /> {istBadSchwartauAnfrage(anfrage) ? 'Bad Schwartau' : 'Stockelsdorf'}
+      </div>
       <div className="karte-kopf">
         <span className="karte-name">{anfrage.name}</span>
         {istTodo ? <AlertTriangle size={12} color="#b8742a" />
