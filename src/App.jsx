@@ -23,10 +23,10 @@ const WEITERLEITUNG_URL = BACKEND_BASE + '/.netlify/functions/weiterleitung-send
 const SPALTEN = ['Offen', 'In Bearbeitung', 'To Do'];
 const ALLE_STATUS = ['Offen', 'In Bearbeitung', 'To Do', 'Erledigt', 'Weitergeleitet'];
 const PRIORITAETEN = ['Sofort', 'Normal', 'Niedrig'];
-const BEARBEITER = ['Luca', 'Finn', 'Annika', 'Unzugewiesen'];
+const BEARBEITER = ['Luca', 'Finn', 'Annika', 'Petra Drewitz', 'Vera Köhn', 'Unzugewiesen'];
 const QUELLEN = ['Website', 'Telefon-Benachrichtigung', 'Manuell erfasst'];
 const READ_ONLY_USERS = ['Oliver Wrobel', 'Hanna Wrobel'];
-const ALLE_USER = ['Luca', 'Finn', 'Annika', 'Oliver Wrobel', 'Hanna Wrobel'];
+const ALLE_USER = ['Luca', 'Finn', 'Annika', 'Petra Drewitz', 'Vera Köhn', 'Oliver Wrobel', 'Hanna Wrobel'];
 
 // Bearbeitungs-Schritte, getrennt nach aktiv (In Bearbeitung) / haengt (To Do)
 const SCHRITTE_AKTIV = ['Rückruf vereinbart', 'Prüfe Terminverfügbarkeit', 'Termin wird abgestimmt'];
