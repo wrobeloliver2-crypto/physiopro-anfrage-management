@@ -23,10 +23,10 @@ const WEITERLEITUNG_URL = BACKEND_BASE + '/.netlify/functions/weiterleitung-send
 const SPALTEN = ['Offen', 'In Bearbeitung', 'To Do'];
 const ALLE_STATUS = ['Offen', 'In Bearbeitung', 'To Do', 'Erledigt', 'Weitergeleitet'];
 const PRIORITAETEN = ['Sofort', 'Normal', 'Niedrig'];
-const BEARBEITER = ['Luca', 'Finn', 'Annika', 'Unzugewiesen'];
+const BEARBEITER = ['Luca', 'Finn', 'Annika', 'Petra Drewitz', 'Vera Köhn', 'Unzugewiesen'];
 const QUELLEN = ['Website', 'Telefon-Benachrichtigung', 'Manuell erfasst'];
 const READ_ONLY_USERS = ['Oliver Wrobel', 'Hanna Wrobel'];
-const ALLE_USER = ['Luca', 'Finn', 'Annika', 'Oliver Wrobel', 'Hanna Wrobel'];
+const ALLE_USER = ['Luca', 'Finn', 'Annika', 'Petra Drewitz', 'Vera Köhn', 'Oliver Wrobel', 'Hanna Wrobel'];
 
 // Bearbeitungs-Schritte, getrennt nach aktiv (In Bearbeitung) / haengt (To Do)
 const SCHRITTE_AKTIV = ['Rückruf vereinbart', 'Prüfe Terminverfügbarkeit', 'Termin wird abgestimmt'];
@@ -469,7 +469,7 @@ function Dashboard() {
     // NICHT nur aus Status/Schritt. Grund: Termin oder E-Mail werden regelmäßig
     // nachträglich erfasst (Karte landet z. B. per manueller Bearbeitung oder über
     // das Schritt-Dropdown in "To Do/Bestätigung senden", ohne dass je ein Entwurf
-    // erstellt wurde). Verließe man sich nur auf Status+Schritt, würde der nächste
+    // erstellt wurde). Verließe man sich nur auf Status/Schritt-Prüfung, würde der nächste
     // "Erledigt"-Klick die Karte fälschlich als "schon versendet" archivieren, ohne
     // dass je eine Bestätigung erstellt wurde — genau das mit reiner
     // Status/Schritt-Prüfung nicht mehr unterscheidbare Bug-Szenario.
