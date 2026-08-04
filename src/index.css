@@ -78,6 +78,9 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
   100% { box-shadow:0 0 0 0 rgba(192,57,43,0); }
 }
 .karte-sofort-banner { display:flex; align-items:center; gap:5px; margin:-2px 0 8px; padding:4px 8px; background:#fbeae8; color:#c0392b; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.03em; border-radius:5px; }
+/* Standort-Kennzeichnung (Bad Schwartau / Stockelsdorf) -- immer sichtbar, unabhaengig
+   von der Spalte, da nur die Offen-Spalte selbst nach Standort aufgeteilt ist. */
+.karte-standort { display:flex; align-items:center; gap:4px; margin-bottom:5px; font-size:9px; font-weight:500; color:var(--beige-dunkel); text-transform:uppercase; letter-spacing:.05em; }
 .karte-kopf { display:flex; align-items:center; justify-content:space-between; gap:6px; }
 .karte-name { font-size:13px; font-weight:500; color:var(--text); }
 .karte-prio { font-size:9px; font-weight:500; text-transform:uppercase; letter-spacing:.04em; padding:2px 8px; border-radius:100px; white-space:nowrap; }
