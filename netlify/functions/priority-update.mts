@@ -7,10 +7,13 @@ import { google } from "googleapis";
 // Link in der Placetel-SMS.
 //
 // Zwei-Phasen-Ablauf (damit bloßes Öffnen nichts auslöst):
-//  - GET  /priority-update?tel=<nummer>  -> zeigt eine Seite mit der
-//    Frage "Ist es dringend?" und einem Button. Es wird NICHTS geschrieben.
-//  - POST /priority-update?tel=<nummer>  -> erst hier wird der neueste
-//    passende Sheet-Eintrag gesucht und dessen Priorität auf "Sofort" gesetzt.
+//  - GET  /priority-update?tel=<nummer>[&standort=<standort>]  -> zeigt eine
+//    Seite mit der Frage "Ist es dringend?" und einem Button. Es wird NICHTS
+//    geschrieben. Ein mitgeschickter standort-Parameter wird nur durchgereicht
+//    (in die POST-Formular-Action übernommen).
+//  - POST /priority-update?tel=<nummer>[&standort=<standort>]  -> erst hier
+//    wird der neueste passende Sheet-Eintrag gesucht und dessen Priorität auf
+//    "Sofort" gesetzt.
 //
 // Echte Sheet-Spalten (verifiziert): "ID", "Telefon", "Priorität"
 // Tab-Name (verifiziert): "Tabellenblatt1"
@@ -21,6 +24,17 @@ import { google } from "googleapis";
 // der übrigen Functions in diesem Repo passt (GOOGLE_SHEET_ID /
 // GOOGLE_SERVICE_ACCOUNT sind hier bereits identisch gesetzt wie im
 // Ursprungsprojekt).
+//
+// Standort-Erkennung (Placetel-Abstimmung, 05.08.2026): Diese Function stuft
+// einen BESTEHENDEN Eintrag hoch (anders als rueckruf-bestaetigung.js, das
+// einen NEUEN Eintrag anlegt). Ohne Standort-Info würde bei identischer
+// Telefonnummer an beiden Standorten ggf. der falsche Eintrag hochgestuft.
+// Wird ?standort=... mitgeschickt, wird die Suche zusätzlich auf Einträge des
+// passenden Standorts eingeschränkt (gleiche Text-Erkennung wie im Dashboard:
+// "Anliegen"-Spalte auf "Bad Schwartau" geprüft). Fehlt der Parameter, oder
+// findet sich am angegebenen Standort kein Treffer, greift unverändert die
+// bisherige reine Telefon-Suche (kein Verhaltensbruch für bestehende Aufrufe
+// ohne den Parameter).
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const SHEET_TAB_NAME = process.env.GOOGLE_SHEET_TAB_NAME || "Tabellenblatt1";
@@ -41,6 +55,13 @@ function columnIndexToLetter(index: number): string {
     n = Math.floor(n / 26) - 1;
   }
   return letter;
+}
+
+// Nur alphanumerisch + Bindestrich zulassen (z. B. "bad-schwartau",
+// "stockelsdorf") – verhindert HTML-Injection beim Einbetten in die
+// serverseitig gerenderte Seite und hält den Wert für den internen Vergleich sauber.
+function sanitizeStandort(raw: string | null): string {
+  return (raw || "").replace(/[^a-zA-Z0-9-]/g, "");
 }
 
 function pageShell(title: string, badge: string, badgeColor: string, bodyHtml: string): Response {
@@ -79,6 +100,8 @@ function pageShell(title: string, badge: string, badgeColor: string, bodyHtml: s
 export default async (req: Request, _context: Context) => {
   const url = new URL(req.url);
   const telRaw = url.searchParams.get("tel");
+  const safeStandort = sanitizeStandort(url.searchParams.get("standort"));
+  const standortQuery = safeStandort ? `&standort=${encodeURIComponent(safeStandort)}` : "";
 
   // --- Phase 1: GET -> nur die Frage-Seite mit Button anzeigen, nichts schreiben ---
   if (req.method !== "POST") {
@@ -97,7 +120,7 @@ export default async (req: Request, _context: Context) => {
       "#4a6741",
       `<h1>Ist Ihr Anliegen dringend?</h1>
        <p>Wenn es dringend ist, markieren wir Ihre Anfrage bevorzugt. Sonst müssen Sie nichts tun – wir melden uns ohnehin bei Ihnen.</p>
-       <form method="POST" action="/priority-update?tel=${encodeURIComponent(safeTel)}">
+       <form method="POST" action="/priority-update?tel=${encodeURIComponent(safeTel)}${standortQuery}">
          <button type="submit">Ja, es ist dringend</button>
        </form>
        <div class="sub">Kein Klick nötig, wenn es nicht eilt.</div>`
@@ -117,6 +140,8 @@ export default async (req: Request, _context: Context) => {
   }
 
   const targetPhone = normalizePhone(telRaw);
+  const standortProvided = safeStandort.length > 0;
+  const wantsBadSchwartau = /bad[-\s]?schwartau/i.test(safeStandort);
 
   try {
     const credentials = JSON.parse(SERVICE_ACCOUNT_JSON);
@@ -141,6 +166,7 @@ export default async (req: Request, _context: Context) => {
     const idCol = header.indexOf("ID");
     const phoneCol = header.indexOf("Telefon");
     const prioCol = header.indexOf("Priorität");
+    const anliegenCol = header.indexOf("Anliegen"); // optional, nur für Standort-Filter
 
     if (idCol === -1 || phoneCol === -1 || prioCol === -1) {
       console.error("Expected columns (ID, Telefon, Priorität) not found:", header);
@@ -148,15 +174,36 @@ export default async (req: Request, _context: Context) => {
         `<h1>Technisches Problem</h1><p>Ihre Anfrage konnte gerade nicht verarbeitet werden. Bitte rufen Sie uns direkt an.</p>`);
     }
 
-    // Neuesten passenden Eintrag finden (letzter Treffer = jüngster, da chronologisch angehängt)
-    let matchRowIndex = -1;
-    let matchId = "";
-    for (let i = 1; i < rows.length; i++) {
-      const rowPhone = normalizePhone(String(rows[i][phoneCol] || ""));
-      if (rowPhone && rowPhone === targetPhone) {
-        matchRowIndex = i;
-        matchId = String(rows[i][idCol] || "");
+    // Neuesten passenden Eintrag finden (letzter Treffer = jüngster, da chronologisch
+    // angehängt). filterByStandort=true schränkt zusätzlich auf den per Parameter
+    // angegebenen Standort ein (siehe Kommentar oben); wird nur verwendet, wenn ein
+    // standort-Parameter mitgeschickt wurde UND die "Anliegen"-Spalte existiert.
+    function findMatch(filterByStandort: boolean): { idx: number; id: string } {
+      let idx = -1;
+      let id = "";
+      for (let i = 1; i < rows.length; i++) {
+        const rowPhone = normalizePhone(String(rows[i][phoneCol] || ""));
+        if (!rowPhone || rowPhone !== targetPhone) continue;
+        if (filterByStandort && anliegenCol !== -1) {
+          const anliegenText = String(rows[i][anliegenCol] || "");
+          const rowIsBadSchwartau =
+            anliegenText.includes("Standort: Bad Schwartau") || /bad\s+schwartau/i.test(anliegenText);
+          if (rowIsBadSchwartau !== wantsBadSchwartau) continue;
+        }
+        idx = i;
+        id = String(rows[i][idCol] || "");
       }
+      return { idx, id };
+    }
+
+    let { idx: matchRowIndex, id: matchId } =
+      standortProvided && anliegenCol !== -1 ? findMatch(true) : { idx: -1, id: "" };
+
+    if (matchRowIndex === -1) {
+      // Fallback: ohne Standort-Filter suchen. Deckt sowohl "kein standort-Parameter
+      // mitgeschickt" als auch "am angegebenen Standort kein Treffer" ab, damit sich
+      // das bisherige Verhalten (reine Telefon-Suche) nicht verschlechtert.
+      ({ idx: matchRowIndex, id: matchId } = findMatch(false));
     }
 
     if (matchRowIndex === -1) {
