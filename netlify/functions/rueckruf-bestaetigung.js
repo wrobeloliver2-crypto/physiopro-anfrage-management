@@ -20,6 +20,17 @@ const jsonResponse = (statusCode, body) => ({
   body: JSON.stringify(body),
 });
 
+// ---- Standort-Erkennung (Placetel-Abstimmung, 05.08.2026) ----
+// rueckruf-sms.html kann optional ?standort=bad-schwartau an die URL
+// anhängen; der Wert kommt hier im payload.standort an. Robust gegen
+// Bindestrich/Leerzeichen und Groß-/Kleinschreibung. Fehlt der Parameter
+// oder ist der Wert unbekannt, bleibt es beim bisherigen Verhalten
+// (Dashboard-Fallback = Stockelsdorf, siehe istBadSchwartauAnfrage() in
+// src/App.jsx).
+function istBadSchwartauStandort(standort) {
+  return /bad[-\s]?schwartau/i.test(String(standort || ''));
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return jsonResponse(200, { ok: true });
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
@@ -33,20 +44,23 @@ exports.handler = async (event) => {
     return jsonResponse(400, { error: 'Ungültiges JSON' });
   }
 
-  const { telefon } = payload;
+  const { telefon, standort } = payload;
   if (!telefon) return jsonResponse(400, { error: 'Telefonnummer fehlt' });
+
+  const istBadSchwartau = istBadSchwartauStandort(standort);
+  const anliegenBasis = 'Bitte anrufen – Name & Anliegen erfragen';
 
   const anfrage = {
     quelle: 'SMS-Rückrufwunsch',
     telefon,
     name: 'Verpasster Anruf',
-    anliegen: 'Bitte anrufen – Name & Anliegen erfragen',
+    anliegen: istBadSchwartau ? `${anliegenBasis} (Standort: Bad Schwartau)` : anliegenBasis,
     prioritaet: 'Sofort',
     history: JSON.stringify([{
       zeitstempel: new Date().toISOString(),
       feld: 'Erstellt',
       benutzer: 'SMS-Rückruf',
-      wert: 'Verpasster Anruf – Rückruf via SMS-Link bestätigt',
+      wert: 'Verpasster Anruf – Rückruf via SMS-Link bestätigt' + (istBadSchwartau ? ' (Bad Schwartau)' : ''),
     }]),
   };
 
