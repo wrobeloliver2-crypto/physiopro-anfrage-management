@@ -111,6 +111,11 @@ const heute = () => new Date().toISOString().slice(0,10);
 const jetztISO = () => new Date().toISOString();
 const neueId = () => 'temp-' + Date.now();
 const uhrzeit = (iso) => { try { return new Date(iso).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}); } catch { return ''; } };
+// Datum + Uhrzeit kombiniert (z.B. "05.08.26 · 14:32"), fuer Kontexte ohne
+// separates Datums-Label daneben (z.B. Aenderungs-History) - dort reicht die
+// reine Uhrzeit nicht aus, weil History-Eintraege ueber mehrere Tage liegen
+// koennen und sonst nicht unterscheidbar sind, an welchem Tag sie passiert sind.
+const datumUhrzeit = (iso) => { try { const d = new Date(iso); return d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'2-digit'}) + ' · ' + uhrzeit(iso); } catch { return ''; } };
 
 function eingangLabel(a) {
   if (!a.eingangsdatum) return '';
@@ -1409,7 +1414,7 @@ function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, o
             <div className="history-liste">
               {(anfrage.history||[]).slice().reverse().map((h,i) => (
                 <div className="history-eintrag" key={i}>
-                  <span className="history-zeit">{uhrzeit(h.zeitstempel)}</span>
+                  <span className="history-zeit">{datumUhrzeit(h.zeitstempel)}</span>
                   <span className="history-text"><strong>{h.aktion}</strong> · {h.von}{h.details ? ' · '+h.details : ''}</span>
                 </div>
               ))}
