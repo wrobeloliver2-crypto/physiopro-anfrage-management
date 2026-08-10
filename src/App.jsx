@@ -270,22 +270,35 @@ function suchtreffer(a, suchbegriff) {
 }
 
 // ---- Standort-Erkennung: Offen-Spalte nach Bad Schwartau / Stockelsdorf ----
-// Bad-Schwartau-Anfragen tragen "Standort: Bad Schwartau" im Anliegen-Text
-// (gesetzt in termin.html, kommt über den Mail-Weg -> anfrage-create.js so
-// im Sheet an) -- das ist der eindeutige, bevorzugte Treffer.
-// Fallback (seit 27.07.2026): manuell erfasste oder telefonische Anfragen
-// tragen dieses feste Tag nicht, können aber trotzdem "Bad Schwartau" im
-// Freitext stehen haben (z. B. "Patientin aus Bad Schwartau ..."). Steht die
-// Wortfolge "Bad Schwartau" (unabhängig von Groß-/Kleinschreibung und Anzahl
-// Leerzeichen) irgendwo im Anliegen-Text, gilt das ebenfalls als eindeutiger
-// Hinweis auf den Standort Bad Schwartau. Nur wenn wirklich kein Hinweis
-// vorhanden ist, landet die Anfrage weiterhin automatisch im
-// Stockelsdorf-Fallback (Hauptstandort Lübeck) -- es gibt keine dritte/
-// unklare Kategorie.
+// Reihenfolge der Prüfungen (jede für sich eindeutig, erste Übereinstimmung
+// gewinnt):
+//   1. utm_campaign trägt "badschwartau"/"bad-schwartau"/"bad schwartau"
+//      (strukturiertes Feld, z.B. gbp/organic/badschwartau) -- das ist der
+//      zuverlässigste Treffer, weil er direkt aus dem Werbekanal-Tracking
+//      kommt und nicht vom Freitext-Format der jeweiligen Formularseite abhängt.
+//   2. Anliegen-Text trägt das feste Tag "Standort: Bad Schwartau" (gesetzt
+//      in termin.html, kommt über den Mail-Weg -> anfrage-create.js so ins Sheet).
+//   3. Fallback (seit 27.07.2026): manuell erfasste oder telefonische Anfragen
+//      tragen weder utm_campaign noch das feste Tag, können aber trotzdem
+//      "Bad Schwartau" im Freitext stehen haben (z. B. "Patientin aus Bad
+//      Schwartau ..."). Steht die Wortfolge "Bad Schwartau" irgendwo im
+//      Anliegen-Text, gilt das ebenfalls als Treffer.
+// Bugfix 10.08.2026 (Fall Tanja Scharwies): der Regex verlangte bisher ein
+// Leerzeichen zwischen "bad" und "schwartau" (\s+). UTM-Campaign-Werte wie
+// "badschwartau" (ohne Trenner) matchten dadurch nie und die Karte fiel in
+// den Stockelsdorf-Fallback, obwohl utm_campaign eindeutig auf Bad Schwartau
+// zeigte. Fix: eigene, vorrangige Prüfung direkt gegen utm_campaign, und der
+// Freitext-Regex toleriert jetzt auch einen optionalen Bindestrich oder gar
+// keinen Trenner zwischen "bad" und "schwartau".
+// Nur wenn wirklich kein Hinweis vorhanden ist, landet die Anfrage weiterhin
+// automatisch im Stockelsdorf-Fallback (Hauptstandort Lübeck) -- es gibt
+// keine dritte/unklare Kategorie.
+const BAD_SCHWARTAU_MUSTER = /bad[\s-]*schwartau/i;
 function istBadSchwartauAnfrage(a) {
+  if (BAD_SCHWARTAU_MUSTER.test(a.utm_campaign || '')) return true;
   const text = a.anliegen || '';
   if (text.includes('Standort: Bad Schwartau')) return true;
-  return /bad\s+schwartau/i.test(text);
+  return BAD_SCHWARTAU_MUSTER.test(text);
 }
 
 // ====================================================================
