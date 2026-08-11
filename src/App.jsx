@@ -23,10 +23,10 @@ const WEITERLEITUNG_URL = BACKEND_BASE + '/.netlify/functions/weiterleitung-send
 const SPALTEN = ['Offen', 'In Bearbeitung', 'To Do'];
 const ALLE_STATUS = ['Offen', 'In Bearbeitung', 'To Do', 'Erledigt', 'Weitergeleitet'];
 const PRIORITAETEN = ['Sofort', 'Normal', 'Niedrig'];
-const BEARBEITER = ['Luca', 'Finn', 'Annika', 'Petra Drewitz', 'Vera Köhn', 'Unzugewiesen'];
+const BEARBEITER = ['Finn', 'Annika', 'Petra Drewitz', 'Vera Köhn', 'Katy', 'Unzugewiesen'];
 const QUELLEN = ['Website', 'Telefon-Benachrichtigung', 'Manuell erfasst'];
-const READ_ONLY_USERS = ['Oliver Wrobel', 'Hanna Wrobel'];
-const ALLE_USER = ['Luca', 'Finn', 'Annika', 'Petra Drewitz', 'Vera Köhn', 'Oliver Wrobel', 'Hanna Wrobel'];
+const READ_ONLY_USERS = ['Oliver Wrobel'];
+const ALLE_USER = ['Finn', 'Annika', 'Petra Drewitz', 'Vera Köhn', 'Katy', 'Oliver Wrobel', 'Hanna Wrobel'];
 
 // Bearbeitungs-Schritte, getrennt nach aktiv (In Bearbeitung) / haengt (To Do)
 const SCHRITTE_AKTIV = ['Rückruf vereinbart', 'Prüfe Terminverfügbarkeit', 'Termin wird abgestimmt'];
@@ -308,7 +308,7 @@ function Dashboard() {
   const [anfragen, setAnfragen] = useState([]);
   const [notizen, setNotizen] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState(() => localStorage.getItem('currentUser') || 'Luca');
+  const [currentUser, setCurrentUser] = useState(() => localStorage.getItem('currentUser') || 'Unzugewiesen');
   const [showNewForm, setShowNewForm] = useState(false);
   const [selectedAnfrage, setSelectedAnfrage] = useState(null);
   const [weiterleitenAnfrage, setWeiterleitenAnfrage] = useState(null);
