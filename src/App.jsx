@@ -7,7 +7,6 @@ import {
   CheckCircle2, Frown, CalendarX, Megaphone, Archive, MapPin,
 } from 'lucide-react';
 import OsteoTermine from './OsteoTermine';
-import KruseAnfragen from './KruseAnfragen';
 
 // ====================================================================
 // Konfiguration
@@ -753,7 +752,6 @@ function StatusSpalte({ status, standort, anfragen, isReadOnly, currentUser, onC
   const istTodoSpalte = status === 'To Do';
   const [todoTab, setTodoTab] = useState(() => localStorage.getItem('todoSpalteTab') || 'todo');
   const zeigtOsteo = istTodoSpalte && todoTab === 'osteo';
-  const zeigtKruse = istTodoSpalte && todoTab === 'kruse';
 
   const wechsleTodoTab = (tab) => {
     setTodoTab(tab);
@@ -763,16 +761,16 @@ function StatusSpalte({ status, standort, anfragen, isReadOnly, currentUser, onC
   // Offen wird in zwei Standort-Spalten aufgeteilt (Bad Schwartau / Stockelsdorf,
   // s. istBadSchwartauAnfrage). Gleiche Farbe/Icon wie die normale Offen-Spalte,
   // nur der Titel unterscheidet sich.
-  const zaehler = (zeigtOsteo || zeigtKruse) ? null : anfragen.length;
-  const Icon = zeigtOsteo ? Calendar : zeigtKruse ? FileText : meta.icon;
-  const kopfFarbe = zeigtOsteo ? 'var(--osteo)' : zeigtKruse ? 'var(--kruse)' : meta.farbe;
-  const kopfTitel = zeigtOsteo ? 'Osteo-Termine' : zeigtKruse ? 'Kruse-Anfragen'
+  const zaehler = zeigtOsteo ? null : anfragen.length;
+  const Icon = zeigtOsteo ? Calendar : meta.icon;
+  const kopfFarbe = zeigtOsteo ? 'var(--osteo)' : meta.farbe;
+  const kopfTitel = zeigtOsteo ? 'Osteo-Termine'
     : standort === 'bad-schwartau' ? 'Offen · Bad Schwartau'
     : standort === 'stockelsdorf' ? 'Offen · Stockelsdorf'
     : status;
 
   return (
-    <section className="spalte-box" style={{ background: zeigtOsteo ? 'var(--osteo-hell)' : zeigtKruse ? 'var(--kruse-hell)' : meta.box, borderColor: zeigtOsteo ? '#c3dade' : zeigtKruse ? '#c9d3e0' : meta.rand }}>
+    <section className="spalte-box" style={{ background: zeigtOsteo ? 'var(--osteo-hell)' : meta.box, borderColor: zeigtOsteo ? '#c3dade' : meta.rand }}>
       <div className="spalte-kopf" style={{ background: kopfFarbe }}>
         <span className="spalte-titel"><Icon size={15} /> {kopfTitel}</span>
         {zaehler !== null && <span className="spalte-zaehler" style={{ color: meta.farbe }}>{zaehler}</span>}
@@ -786,16 +784,11 @@ function StatusSpalte({ status, standort, anfragen, isReadOnly, currentUser, onC
           <button className={'spalte-todo-tab' + (todoTab === 'osteo' ? ' aktiv osteo-aktiv' : '')} onClick={() => wechsleTodoTab('osteo')}>
             Osteo-Termine
           </button>
-          <button className={'spalte-todo-tab' + (todoTab === 'kruse' ? ' aktiv kruse-aktiv' : '')} onClick={() => wechsleTodoTab('kruse')}>
-            Kruse-Anfragen
-          </button>
         </div>
       )}
 
       {zeigtOsteo ? (
         <OsteoTermine isReadOnly={isReadOnly} />
-      ) : zeigtKruse ? (
-        <KruseAnfragen isReadOnly={isReadOnly} currentUser={currentUser} />
       ) : (
         <div className="spalte-karten">
           {anfragen.map((a) => (
@@ -889,13 +882,6 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
             {anfrage.utm_campaign ? ' — ' + anfrage.utm_campaign : ''}
             {anfrage.utm_content ? ' · ' + anfrage.utm_content : ''}
           </span>
-        </div>
-      )}
-
-      {anfrage.dsgvoEinwilligungKruse && (
-        <div className={'karte-dsgvo-chip ' + (anfrage.dsgvoEinwilligungKruse === 'Ja' ? 'karte-dsgvo-ja' : 'karte-dsgvo-nein')}>
-          {anfrage.dsgvoEinwilligungKruse === 'Ja' ? <CheckCircle2 size={11} /> : <X size={11} />}
-          <span>Einwilligung Datenanforderung (Kruse): {anfrage.dsgvoEinwilligungKruse}</span>
         </div>
       )}
 
