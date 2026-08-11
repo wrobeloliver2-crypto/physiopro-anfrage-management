@@ -8,7 +8,7 @@ const { google } = require('googleapis');
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 // Tab-Name wird dynamisch ermittelt (robust gegen 'Tabellenblatt1' vs 'Sheet1')
 
-// Spalten-Reihenfolge entspricht dem Sheet-Schema A..Z
+// Spalten-Reihenfolge entspricht dem Sheet-Schema A..Y
 // P (__PowerAppsId__) wird vom Google-Connector verwaltet und transparent durchgereicht.
 const COLUMNS = [
   'id',
@@ -36,7 +36,6 @@ const COLUMNS = [
   'utm_campaign',
   'utm_content',
   'gclid',
-  'dsgvoEinwilligungKruse',
 ];
 
 // ---- Auth (Service Account) ----
@@ -112,7 +111,7 @@ exports.handler = async (event) => {
   try {
     const sheets = getSheets();
     const tab = await ersterTabName(sheets, SHEET_ID);
-    const RANGE = tab + '!A2:Z1000';
+    const RANGE = tab + '!A2:Y1000';
 
     // -------------------- READ --------------------
     if (event.httpMethod === 'GET') {

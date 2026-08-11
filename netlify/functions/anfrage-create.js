@@ -48,7 +48,6 @@ const COLUMNS = [
   'utm_campaign',     // W
   'utm_content',      // X
   'gclid',            // Y
-  'dsgvoEinwilligungKruse', // Z
 ];
 
 // ---- Telefon-Normalisierung (IDENTISCH zum Dashboard / App.jsx) ----
@@ -82,19 +81,39 @@ function istPraxisnummer(tel) {
   return PRAXIS_NUMMERN.some((p) => ziffernKern(p) === k);
 }
 
-// ---- DSGVO-Einwilligung (Kruse) aus dem Mailtext ableiten ----
-// Hintergrund: termin.html (Bad Schwartau) schreibt den Einwilligungsstatus
-// zur Datenanforderung bei Frau Thompson explizit als Text
-// "Einwilligung Datenanforderung bei Frau Thompson: JA" bzw. "... NEIN" in
-// die Anfrage. Auf dem Mail-Weg (Flow #1 -> diese Function) kommt dieser
-// Text im Anliegen (oder ggf. in den Notizen) an, wurde bislang aber nicht
-// in Spalte Z (dsgvoEinwilligungKruse) übernommen. Diese Funktion holt ihn
-// dort heraus. Rein additiv: greift nur, wenn der Payload das Feld nicht
-// bereits explizit selbst mitschickt, und beeinflusst keine andere Quelle.
-function parseKruseConsent(text) {
-  const m = /Einwilligung Datenanforderung bei Frau Thompson:\s*(JA|NEIN)/i.exec(String(text || ''));
-  if (!m) return '';
-  return m[1].toUpperCase() === 'JA' ? 'Ja' : 'Nein';
+// ---- Priorität "Sofort" für Anfragen über /privat-versichert erzwingen ----
+// Hintergrund (Oliver, 30.07.2026): Anfragen über die Landingpage
+// physioproluebeck.de/privat-versichert sollen automatisch mit Priorität
+// "Sofort" ins Dashboard kommen, unabhängig davon, was Flow #1 im Payload
+// mitschickt. Erkennungsmerkmal ist der feste Text "Herkunft: /privat-
+// versichert", den privat-versichert.html jeder Nachricht anhängt (siehe
+// pvSubmit() in privat-versichert.html, Repo physiopro-website). Bewusst
+// als eigene erzwingende Regel NACH dem generischen Payload-Fallback
+// (payload.prioritaet || 'Normal') angewendet, nicht als weiterer Fallback-
+// Wert selbst — soll auch dann greifen, wenn der Flow versehentlich schon
+// "Normal" oder einen anderen Wert mitschickt.
+function istPrivatVersichertAnfrage(anliegen) {
+  return /Herkunft:\s*\/privat-versichert/i.test(String(anliegen || ''));
+}
+
+// ---- Priorität "Niedrig" für Terminabsagen erzwingen (alle Kanäle) ----
+// Hintergrund (Oliver, 30.07.2026): Terminabsagen sollen unabhängig vom
+// Eingangskanal (Telefon-KI/Placetel, Netlify-Webformular, SMS-Rückruf,
+// manuell erfasst) automatisch mit Priorität "Niedrig" ins Dashboard
+// kommen, weil sie in der Regel keine dringende Bearbeitung brauchen.
+// Erkennung bewusst NUR über das feste Schlüsselwort "Terminabsage"
+// (deckt alle bisher beobachteten echten Formulierungen ab, siehe u.a.
+// Telefon-KI-Texte wie "Terminabsage für den ... Uhr" oder "Terminabsage,
+// Termin am ..."), NICHT über freiere Formulierungsmuster ("möchte
+// absagen", "kann nicht kommen" o.ä.) — solche Muster ließen sich nicht
+// zuverlässig von ähnlich klingenden, aber anderen Anliegen abgrenzen
+// (Entscheidung von Oliver: robuste Erkennung über Perfektion gestellt).
+// Rangfolge: Falls sowohl Terminabsage ALS AUCH /privat-versichert
+// zutreffen (siehe istPrivatVersichertAnfrage), hat "Niedrig" Vorrang vor
+// "Sofort" — die Terminabsage-Prüfung wird deshalb an der Anwendungsstelle
+// bewusst ALS LETZTES ausgewertet.
+function istTerminabsage(anliegen) {
+  return /termin\s*absage/i.test(String(anliegen || ''));
 }
 
 // ---- Priorität "Sofort" für Anfragen über /privat-versichert erzwingen ----
@@ -274,13 +293,12 @@ exports.handler = async (event) => {
     } catch (e) { /* History bleibt unverändert, kein harter Fehler */ }
   }
 
-  // ---- DSGVO-Einwilligung (Kruse) bestimmen: expliziter Payload-Wert hat
-  // Vorrang, sonst aus Anliegen bzw. Notizen geparst (s.o.) ----
-  const dsgvoEinwilligungKruse =
-    payload.dsgvoEinwilligungKruse ||
-    parseKruseConsent(payload.anliegen) ||
-    parseKruseConsent(payload.notizen) ||
-    '';
+  const prioritaetVorPruefung = istPrivatVersichertAnfrage(payload.anliegen)
+    ? 'Sofort'
+    : (payload.prioritaet || 'Normal');
+  const prioritaetFinal = istTerminabsage(payload.anliegen)
+    ? 'Niedrig'
+    : prioritaetVorPruefung;
 
   const prioritaetVorPruefung = istPrivatVersichertAnfrage(payload.anliegen)
     ? 'Sofort'
@@ -315,7 +333,6 @@ exports.handler = async (event) => {
     utm_campaign: payload.utm_campaign || '', // W
     utm_content:  payload.utm_content  || '', // X
     gclid:        payload.gclid        || '', // Y
-    dsgvoEinwilligungKruse, // Z
   };
 
   const row = COLUMNS.map((k) => (obj[k] !== undefined && obj[k] !== null ? String(obj[k]) : ''));
