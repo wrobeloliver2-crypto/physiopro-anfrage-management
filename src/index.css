@@ -10,7 +10,6 @@
   --bernstein:#b8742a; --bernstein-hell:#d99a3a; --rot:#c0392b;
   --lila:#7a5ba8; --lila-dunkel:#5a3f80; --lila-hell:#f0ebf5;
   --osteo:#3d6b73; --osteo-dunkel:#2c4d54; --osteo-hell:#e9f1f2;
-  --kruse:#3d5a80; --kruse-dunkel:#2c4159; --kruse-hell:#e9edf3;
   --sans:'DM Sans',system-ui,sans-serif; --serif:'Cormorant Garamond',Georgia,serif;
 }
 * { box-sizing:border-box; margin:0; padding:0; }
@@ -309,13 +308,6 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 .karte-best-chip svg { flex-shrink:0; }
 .karte-best-offen { color:#2f6b43; background:#dff0e4; }
 .karte-best-offen svg { color:#2f6b43; }
-/* DSGVO-Einwilligung Datenanforderung Kruse (Bad Schwartau) */
-.karte-dsgvo-chip { display:flex; align-items:center; gap:5px; font-size:11px; font-weight:500; padding:4px 9px; border-radius:7px; margin-top:6px; line-height:1.4; }
-.karte-dsgvo-chip svg { flex-shrink:0; }
-.karte-dsgvo-ja { color:#2f6b43; background:#dff0e4; }
-.karte-dsgvo-ja svg { color:#2f6b43; }
-.karte-dsgvo-nein { color:#8f3b30; background:#fbeae8; }
-.karte-dsgvo-nein svg { color:#8f3b30; }
 
 /* ════════════════════════════════════════════════
    Osteopathie-Termine (Tab in der To-Do-Spalte)
@@ -404,52 +396,3 @@ body { font-family:var(--sans); color:var(--text); background:var(--creme); -web
 .osteo-confirm-actions button { flex:1; }
 
 .osteo-toast { position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:var(--osteo-dunkel); color:#fff; padding:10px 18px; border-radius:100px; font-size:12px; font-weight:500; box-shadow:0 6px 20px rgba(0,0,0,.2); z-index:1100; }
-
-/* ════════════════════════════════════════════════
-   Kruse-Datenanforderungen (Tab in der To-Do-Spalte)
-   ════════════════════════════════════════════════ */
-.spalte-todo-tab.aktiv.kruse-aktiv { background:var(--kruse); border-color:var(--kruse); }
-
-.kruse-wrap { padding:14px 13px 13px; background:var(--kruse-hell); }
-.kruse-tiles { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:12px; }
-.kruse-tile { background:#fff; border:1px solid #c9d3e0; border-radius:10px; padding:10px 8px; text-align:center; }
-.kruse-tile-n { font-size:20px; font-weight:700; color:var(--kruse); line-height:1.2; }
-.kruse-tile-l { font-size:10px; color:var(--grau-hell); margin-top:2px; }
-
-.kruse-card { background:#fff; border:1px solid #c9d3e0; border-radius:11px; padding:14px; }
-.kruse-card-h { font-size:13px; font-weight:700; color:var(--kruse-dunkel); margin-bottom:11px; }
-.kruse-empty { text-align:center; color:var(--grau-hell); font-size:12px; padding:26px 0; }
-
-.kruse-msg { padding:9px 11px; border-radius:8px; font-size:12px; margin-bottom:11px; }
-.kruse-msg-ok { background:var(--kruse-hell); color:var(--kruse-dunkel); border:1px solid #c9d3e0; }
-.kruse-msg-err { background:#fbeae8; color:#a3473e; border:1px solid #f0c4bd; }
-
-.kruse-list { display:flex; flex-direction:column; gap:9px; }
-.kruse-fall { border:1px solid #c9d3e0; border-radius:10px; padding:12px 13px; background:#fff; }
-.kruse-fall-top { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
-.kruse-fall-name { font-weight:600; color:var(--kruse-dunkel); font-size:12px; }
-.kruse-fall-meta { font-size:11px; color:var(--grau); margin-top:3px; }
-.kruse-hinweis { font-size:11px; color:var(--beige-dunkel); margin-top:6px; background:var(--beige-warm); border-radius:6px; padding:6px 9px; font-style:italic; }
-
-.kruse-status-chip { font-size:9px; font-weight:600; text-transform:uppercase; letter-spacing:.03em; padding:3px 9px; border-radius:100px; white-space:nowrap; }
-.kruse-status-offen { color:var(--bernstein); background:#fdf3e3; }
-.kruse-status-angefordert { color:#1a5276; background:#d6eaf8; }
-.kruse-status-vollstaendig { color:var(--kruse-dunkel); background:var(--kruse-hell); }
-.kruse-status-erledigt { color:#2f6b43; background:#dff0e4; }
-
-.kruse-notiz-feld { width:100%; margin-top:10px; padding:8px 10px; border:1px solid #c9d3e0; border-radius:8px; font-size:12px; font-family:var(--sans); color:var(--text); background:var(--creme); resize:vertical; }
-.kruse-notiz-feld:focus { outline:2px solid var(--kruse); outline-offset:-1px; background:#fff; }
-
-.kruse-fall-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:10px; }
-.kruse-primary-btn { background:var(--kruse); color:#fff; border:none; border-radius:8px; padding:8px 13px; font-size:11px; font-weight:600; cursor:pointer; font-family:var(--sans); transition:background .15s; }
-.kruse-primary-btn:hover { background:var(--kruse-dunkel); }
-.kruse-primary-btn:disabled { opacity:.5; cursor:not-allowed; }
-.kruse-ghost-btn { background:#fff; color:var(--kruse-dunkel); border:1px solid #c9d3e0; border-radius:7px; padding:8px 11px; font-size:11px; font-weight:600; cursor:pointer; font-family:var(--sans); transition:.15s; }
-.kruse-ghost-btn:hover { background:var(--kruse-hell); border-color:var(--kruse); }
-.kruse-ghost-btn:disabled { opacity:.5; cursor:not-allowed; }
-
-.kruse-history-toggle { background:none; border:none; color:var(--kruse-dunkel); font-family:var(--sans); font-size:11px; cursor:pointer; display:flex; align-items:center; gap:5px; padding:8px 0 0; }
-.kruse-history-liste { display:flex; flex-direction:column; gap:6px; background:var(--creme); border-radius:8px; padding:9px; margin-top:6px; }
-.kruse-history-eintrag { display:flex; gap:10px; font-size:11px; }
-.kruse-history-zeit { color:var(--grau-hell); flex-shrink:0; min-width:62px; }
-.kruse-history-text { color:var(--text-mid); }
