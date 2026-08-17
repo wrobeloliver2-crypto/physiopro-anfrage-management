@@ -5,8 +5,10 @@ import {
   PhoneCall, Pin, ArrowRight, ArrowLeft, Send, Inbox, UserCheck,
   Search, FileText, PhoneOff, CalendarCheck, Hourglass, RotateCcw,
   CheckCircle2, Frown, CalendarX, Megaphone, Archive, MapPin,
+  MessageSquare, HelpCircle, CornerUpLeft,
 } from 'lucide-react';
 import OsteoTermine from './OsteoTermine';
+import './rueckfrage.css';
 
 // ====================================================================
 // Konfiguration
@@ -18,6 +20,11 @@ const BACKEND_BASE = import.meta.env.VITE_BACKEND_BASE || '';
 const API_URL = BACKEND_BASE + '/.netlify/functions/sheets-api';
 const NOTES_URL = BACKEND_BASE + '/.netlify/functions/notes-api';
 const WEITERLEITUNG_URL = BACKEND_BASE + '/.netlify/functions/weiterleitung-send';
+// Feldgranulares Schreiben der Standort-Rückfrage: schreibt NUR die Klärungs-
+// und History-Zelle einer Zeile, nicht die ganze Tabelle (siehe Kommentar in
+// netlify/functions/klaerung-update.js). Wichtig, weil bei Rückfragen bewusst
+// zwei Standorte gleichzeitig am selben Board arbeiten.
+const KLAERUNG_URL = BACKEND_BASE + '/.netlify/functions/klaerung-update';
 
 const SPALTEN = ['Offen', 'In Bearbeitung', 'To Do'];
 const ALLE_STATUS = ['Offen', 'In Bearbeitung', 'To Do', 'Erledigt', 'Weitergeleitet'];
@@ -269,22 +276,140 @@ function suchtreffer(a, suchbegriff) {
 }
 
 // ---- Standort-Erkennung: Offen-Spalte nach Bad Schwartau / Stockelsdorf ----
-// Bad-Schwartau-Anfragen tragen "Standort: Bad Schwartau" im Anliegen-Text
-// (gesetzt in termin.html, kommt über den Mail-Weg -> anfrage-create.js so
-// im Sheet an) -- das ist der eindeutige, bevorzugte Treffer.
-// Fallback (seit 27.07.2026): manuell erfasste oder telefonische Anfragen
-// tragen dieses feste Tag nicht, können aber trotzdem "Bad Schwartau" im
-// Freitext stehen haben (z. B. "Patientin aus Bad Schwartau ..."). Steht die
-// Wortfolge "Bad Schwartau" (unabhängig von Groß-/Kleinschreibung und Anzahl
-// Leerzeichen) irgendwo im Anliegen-Text, gilt das ebenfalls als eindeutiger
-// Hinweis auf den Standort Bad Schwartau. Nur wenn wirklich kein Hinweis
-// vorhanden ist, landet die Anfrage weiterhin automatisch im
-// Stockelsdorf-Fallback (Hauptstandort Lübeck) -- es gibt keine dritte/
-// unklare Kategorie.
+// Reihenfolge der Prüfungen (jede für sich eindeutig, erste Übereinstimmung
+// gewinnt):
+//   1. utm_campaign trägt "badschwartau"/"bad-schwartau"/"bad schwartau"
+//      (strukturiertes Feld, z.B. gbp/organic/badschwartau) -- das ist der
+//      zuverlässigste Treffer, weil er direkt aus dem Werbekanal-Tracking
+//      kommt und nicht vom Freitext-Format der jeweiligen Formularseite abhängt.
+//   2. Anliegen-Text trägt das feste Tag "Standort: Bad Schwartau" (gesetzt
+//      in termin.html, kommt über den Mail-Weg -> anfrage-create.js so ins Sheet).
+//   3. Fallback (seit 27.07.2026): manuell erfasste oder telefonische Anfragen
+//      tragen weder utm_campaign noch das feste Tag, können aber trotzdem
+//      "Bad Schwartau" im Freitext stehen haben (z. B. "Patientin aus Bad
+//      Schwartau ..."). Steht die Wortfolge "Bad Schwartau" irgendwo im
+//      Anliegen-Text, gilt das ebenfalls als Treffer.
+// Bugfix 10.08.2026 (Fall Tanja Scharwies): der Regex verlangte bisher ein
+// Leerzeichen zwischen "bad" und "schwartau" (\s+). UTM-Campaign-Werte wie
+// "badschwartau" (ohne Trenner) matchten dadurch nie und die Karte fiel in
+// den Stockelsdorf-Fallback, obwohl utm_campaign eindeutig auf Bad Schwartau
+// zeigte. Fix: eigene, vorrangige Prüfung direkt gegen utm_campaign, und der
+// Freitext-Regex toleriert jetzt auch einen optionalen Bindestrich oder gar
+// keinen Trenner zwischen "bad" und "schwartau".
+// Nur wenn wirklich kein Hinweis vorhanden ist, landet die Anfrage weiterhin
+// automatisch im Stockelsdorf-Fallback (Hauptstandort Lübeck) -- es gibt
+// keine dritte/unklare Kategorie.
+const BAD_SCHWARTAU_MUSTER = /bad[\s-]*schwartau/i;
 function istBadSchwartauAnfrage(a) {
+  if (BAD_SCHWARTAU_MUSTER.test(a.utm_campaign || '')) return true;
   const text = a.anliegen || '';
   if (text.includes('Standort: Bad Schwartau')) return true;
-  return /bad\s+schwartau/i.test(text);
+  return BAD_SCHWARTAU_MUSTER.test(text);
+}
+
+// ---- Expliziter Standort (Sheet-Spalte Z), Texterkennung nur als Fallback ----
+// Seit 17.08.2026 hat jede Zeile ein echtes Standort-Feld. Es hat immer Vorrang;
+// ist es leer (alle Altzeilen, alle automatischen Wege ohne Standort-Signal),
+// greift unverändert die bisherige Text-/utm-Erkennung oben. Damit ändert sich
+// für Bestandsdaten nichts, neue Karten sind aber eindeutig zugeordnet.
+// ACHTUNG: Spalte Z trug bis zur Kruse-Entfernung die DSGVO-Einwilligung
+// ("Ja"/"Nein"). Deshalb werden ausschließlich die zwei bekannten Slugs
+// akzeptiert — alles andere gilt als leer.
+const STANDORT_BS = 'bad-schwartau';
+const STANDORT_STO = 'stockelsdorf';
+const STANDORT_LABEL = { [STANDORT_BS]: 'Bad Schwartau', [STANDORT_STO]: 'Stockelsdorf' };
+const STANDORT_WAHL = [STANDORT_BS, STANDORT_STO];
+function normStandort(roh) {
+  const s = String(roh || '').trim().toLowerCase().replace(/[\s_]+/g, '-');
+  if (s === 'bad-schwartau' || s === 'badschwartau') return STANDORT_BS;
+  if (s === 'stockelsdorf') return STANDORT_STO;
+  return '';
+}
+function standortVon(a) {
+  return normStandort(a && a.standort) || (istBadSchwartauAnfrage(a) ? STANDORT_BS : STANDORT_STO);
+}
+const andererStandort = (s) => (s === STANDORT_BS ? STANDORT_STO : STANDORT_BS);
+const standortName = (s) => STANDORT_LABEL[s] || '—';
+
+// ---- Standort-Rückfrage („Klärung", Sheet-Spalte AA) ----
+// Datenform: { von, an, status, verlauf:[{zeit,autor,richtung,von,an,text}] }
+//   von     = fragender Standort, an = gefragter Standort
+//   status  = 'offen'        -> wartet auf Antwort bei `an`
+//             'beantwortet'  -> Antwort liegt bei `von` zur Kenntnis
+//             'geschlossen'  -> geklärt, Karte läuft normal weiter
+// Die Karte selbst bleibt immer bei ihrem Standort und in ihrer Status-Spalte —
+// eine Rückfrage ist ein Nebenzustand, keine Kanban-Spalte. Zurückschicken ist
+// deshalb kein Sonderfall, sondern dieselbe Aktion mit getauschter Richtung.
+function klaerungVon(a) {
+  const k = a && a.klaerung;
+  if (!k || typeof k !== 'object') return null;
+  const von = normStandort(k.von);
+  const an = normStandort(k.an);
+  if (!von || !an || von === an) return null;
+  const status = ['offen', 'beantwortet', 'geschlossen'].includes(k.status) ? k.status : 'offen';
+  return { von, an, status, verlauf: Array.isArray(k.verlauf) ? k.verlauf : [] };
+}
+const klaerungOffen = (a) => { const k = klaerungVon(a); return !!k && k.status === 'offen'; };
+const klaerungBeantwortet = (a) => { const k = klaerungVon(a); return !!k && k.status === 'beantwortet'; };
+// „Aktiv" = die Rückfrage verlangt noch irgendwo eine Reaktion (offen ODER
+// beantwortet, aber noch nicht als geklärt geschlossen).
+const klaerungAktiv = (a) => klaerungOffen(a) || klaerungBeantwortet(a);
+function klaerungLetzterEintrag(a) {
+  const k = klaerungVon(a);
+  if (!k || !k.verlauf.length) return null;
+  return k.verlauf[k.verlauf.length - 1];
+}
+// Wartezeit der offenen Rückfrage in Minuten (für „wartet seit …")
+function klaerungWartetMin(a) {
+  const e = klaerungLetzterEintrag(a);
+  if (!e || !e.zeit) return null;
+  const d = new Date(e.zeit);
+  if (isNaN(d.getTime())) return null;
+  return Math.max(0, Math.floor((Date.now() - d.getTime()) / 60000));
+}
+// Nächsten Klärungs-Zustand berechnen — bewusst als reine Funktion (kein State,
+// kein Netzwerk), damit die Richtungslogik testbar und an einer Stelle steht.
+//   richtung 'frage'  + neuStart  -> Karte fragt beim anderen Standort an
+//   richtung 'frage'  + tauschen  -> Gegenfrage: Richtung gespiegelt, wieder offen
+//   richtung 'frage'  (sonst)     -> Nachfassen in derselben Richtung
+//   richtung 'antwort'            -> Richtung bleibt, Status wird 'beantwortet'
+// Rückgabe: { klaerung, label, sender, empfaenger } oder null (leerer Text).
+function naechsteKlaerung(anfrage, text, { richtung, tauschen } = {}, autor) {
+  const sauber = (text || '').trim();
+  if (!sauber) return null;
+  const alt = klaerungVon(anfrage);
+  const neuStart = !alt || alt.status === 'geschlossen';
+  let von, an, status;
+  if (neuStart) {
+    von = standortVon(anfrage); an = andererStandort(von); status = 'offen';
+  } else if (richtung === 'antwort') {
+    von = alt.von; an = alt.an; status = 'beantwortet';
+  } else if (tauschen) {
+    von = alt.an; an = alt.von; status = 'offen';
+  } else {
+    von = alt.von; an = alt.an; status = 'offen';
+  }
+  // Absender ist bei einer Antwort der gefragte Standort, sonst der fragende.
+  const sender = richtung === 'antwort' ? an : von;
+  const empfaenger = richtung === 'antwort' ? von : an;
+  const eintrag = {
+    zeit: jetztISO(), autor: autor || '', richtung: richtung === 'antwort' ? 'antwort' : 'frage',
+    von: sender, an: empfaenger, text: sauber,
+  };
+  return {
+    klaerung: { von, an, status, verlauf: [...(neuStart ? [] : alt.verlauf), eintrag].slice(-50) },
+    label: (richtung === 'antwort' ? 'Antwort an ' : 'Frage an ') + standortName(empfaenger),
+    sender, empfaenger,
+  };
+}
+
+function wartedauerLabel(min) {
+  if (min === null) return '';
+  if (min < 60) return 'seit ' + min + ' Min';
+  const std = Math.floor(min / 60);
+  if (std < 24) return 'seit ' + std + ' Std';
+  const tage = Math.floor(std / 24);
+  return 'seit ' + tage + ' Tag' + (tage === 1 ? '' : 'en');
 }
 
 // ====================================================================
@@ -298,6 +423,7 @@ function Dashboard() {
   const [showNewForm, setShowNewForm] = useState(false);
   const [selectedAnfrage, setSelectedAnfrage] = useState(null);
   const [weiterleitenAnfrage, setWeiterleitenAnfrage] = useState(null);
+  const [klaerungAnfrage, setKlaerungAnfrage] = useState(null); // Karte, für die das Rückfrage-Modal offen ist
   const [ergebnisAnfrage, setErgebnisAnfrage] = useState(null);
   const [mailtoAnfrage, setMailtoAnfrage] = useState(null); // { anfrage, ergebnis } für E-Mail-Modal
   const [draftOhneErgebnisAnfrage, setDraftOhneErgebnisAnfrage] = useState(null); // Anfrage, für die "Entwurf erstellen" (ohne Ergebnis) offen ist
@@ -397,6 +523,7 @@ function Dashboard() {
       id: neueId(), eingangsdatum: heute(), quelle: data.quelle, name: data.name,
       telefon: normalizeTelefon(data.telefon), email: data.email || '', anliegen: data.anliegen,
       prioritaet: data.prioritaet, status: 'Offen', bearbeiter: 'Unzugewiesen',
+      standort: normStandort(data.standort) || STANDORT_STO, klaerung: null,
       schritt: '', followupDatum:'', followupZeit:'', notizen:'', ergebnis:'',
       history: [historyEintrag('Erstellt', currentUser, 'Manuell erfasst')], reminderStatus:'', weitergeleitetAn:'', letzterReminder:'',
     };
@@ -570,6 +697,56 @@ function Dashboard() {
       } : a); saveToSheets(next); return next; });
     }
   };
+  // ------------------------------------------------------------------
+  // Standort-Rückfragen („Klärung")
+  // ------------------------------------------------------------------
+  // Bewusst NICHT über persist()/saveToSheets(): eine Rückfrage wird per
+  // Definition von einem anderen Standort aus geschrieben als die Karte
+  // sonst bearbeitet wird. Ein Full-Table-Rewrite würde dabei die
+  // zwischenzeitlichen Änderungen des anderen Standorts überschreiben.
+  // Stattdessen: lokal optimistisch aktualisieren + feldgranular schreiben
+  // (klaerung-update schreibt nur die Klärungs- und die History-Zelle).
+  const sendeKlaerung = async (anfrage, neueKlaerung, histEintrag) => {
+    try {
+      const res = await fetch(KLAERUNG_URL, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: anfrage.id, klaerung: neueKlaerung, historyEintrag: histEintrag }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error((data && data.error) || ('HTTP ' + res.status));
+      }
+      setLetzteAenderung(new Date());
+    } catch (e) {
+      setError('Rückfrage konnte nicht gespeichert werden (' + (e.message || 'Netzwerkfehler') + ')');
+      loadFromSheets(); // lokalen, optimistischen Stand verwerfen
+    }
+  };
+  // richtung: 'frage' | 'antwort'; tauschen=true dreht die Richtung um
+  // („zurück an den fragenden Standort" -> derselbe Mechanismus, nur gespiegelt).
+  const klaerungSenden = (anfrage, text, opt = {}) => {
+    const naechste = naechsteKlaerung(anfrage, text, opt, currentUser);
+    if (!naechste) return;
+    const neueKlaerung = naechste.klaerung;
+    const histEintrag = historyEintrag('Rückfrage', currentUser, naechste.label + ': ' + text.trim().slice(0, 300));
+    setAnfragen((prev) => prev.map((a) => a.id === anfrage.id
+      ? { ...a, klaerung: neueKlaerung, history: [...(a.history || []), histEintrag] } : a));
+    setKlaerungAnfrage(null);
+    sendeKlaerung(anfrage, neueKlaerung, histEintrag);
+  };
+  // „Geklärt" – Rückfrage abschließen. Der Verlauf bleibt in der Karte
+  // (Klärungs-Feld + Änderungs-History), verschwindet aber aus der Leiste.
+  const klaerungSchliessen = (anfrage) => {
+    const alt = klaerungVon(anfrage);
+    if (!alt) return;
+    const neueKlaerung = { ...alt, status: 'geschlossen' };
+    const histEintrag = historyEintrag('Rückfrage', currentUser, 'als geklärt geschlossen');
+    setAnfragen((prev) => prev.map((a) => a.id === anfrage.id
+      ? { ...a, klaerung: neueKlaerung, history: [...(a.history || []), histEintrag] } : a));
+    setKlaerungAnfrage(null);
+    sendeKlaerung(anfrage, neueKlaerung, histEintrag);
+  };
+
   const deleteAnfrage = (anfrage) => {
     if (!window.confirm('Anfrage von '+anfrage.name+' wirklich loeschen?')) return;
     persist(anfragen.filter((a) => a.id!==anfrage.id)); setSelectedAnfrage(null);
@@ -609,12 +786,21 @@ function Dashboard() {
   const sofortCount = sichtbar.filter((a) => a.prioritaet==='Sofort').length;
   const erledigtHeute = useMemo(() => anfragen.filter((a) => a.status==='Erledigt' && istHeute(a.eingangsdatum)).length, [anfragen]);
   const weitergeleitetHeute = useMemo(() => anfragen.filter((a) => a.status==='Weitergeleitet' && istHeute(a.eingangsdatum)).length, [anfragen]);
+  // Offene/beantwortete Standort-Rückfragen (nur auf noch aktiven Karten).
+  // Bewusst NICHT von der Suche gefiltert: die Leiste soll immer den
+  // Gesamtstand zeigen, damit keine Rückfrage übersehen wird.
+  const rueckfragen = sichtbar.filter(klaerungAktiv);
 
   // Suchfeld filtert nur die Anzeige (Karten in den Spalten/im Archiv) –
   // die Kopfzeilen-Zähler (offen/sofort/erledigt/weitergeleitet) bleiben
   // unabhängig von der Suche, damit sie immer den Gesamtstand zeigen.
   const sichtbarGefiltert = suchbegriff.trim() ? sichtbar.filter((a) => suchtreffer(a, suchbegriff)) : sichtbar;
   const muelleimerGefiltert = suchbegriff.trim() ? muelleimer.filter((a) => suchtreffer(a, suchbegriff)) : muelleimer;
+  // Immer den aktuellen Stand der Karte ins Rückfrage-Modal geben (der State
+  // wird durch den 60s-Refresh und die optimistischen Updates fortgeschrieben).
+  const klaerungLive = klaerungAnfrage
+    ? (anfragen.find((a) => a.id === klaerungAnfrage.id) || klaerungAnfrage)
+    : null;
 
   return (
     <div className="app-shell">
@@ -622,6 +808,7 @@ function Dashboard() {
         <Kopfzeile
           offeneCount={offeneCount} sofortCount={sofortCount}
           erledigtHeute={erledigtHeute} weitergeleitetHeute={weitergeleitetHeute}
+          rueckfragenCount={rueckfragen.length}
           letzteAenderung={letzteAenderung} currentUser={currentUser}
           setCurrentUser={setCurrentUser} isReadOnly={isReadOnly}
           suchbegriff={suchbegriff} setSuchbegriff={setSuchbegriff}
@@ -647,22 +834,28 @@ function Dashboard() {
           {loading && anfragen.length===0 ? (
             <div className="lade-zustand"><div className="spinner" /><span>Daten laden…</span></div>
           ) : ansicht==='aktiv' ? (
-            <div className="spalten-grid spalten-grid-4">
-              <StatusSpalte key="Offen-bs" status="Offen" standort="bad-schwartau"
-                anfragen={sichtbarGefiltert.filter((a) => a.status==='Offen' && istBadSchwartauAnfrage(a))}
-                isReadOnly={isReadOnly} currentUser={currentUser} onCardClick={setSelectedAnfrage}
-                onMove={cardMove} onSetSchritt={cardSetSchritt} onWeiterleiten={setWeiterleitenAnfrage} />
-              <StatusSpalte key="Offen-sto" status="Offen" standort="stockelsdorf"
-                anfragen={sichtbarGefiltert.filter((a) => a.status==='Offen' && !istBadSchwartauAnfrage(a))}
-                isReadOnly={isReadOnly} currentUser={currentUser} onCardClick={setSelectedAnfrage}
-                onMove={cardMove} onSetSchritt={cardSetSchritt} onWeiterleiten={setWeiterleitenAnfrage} />
-              {SPALTEN.filter((status) => status !== 'Offen').map((status) => (
-                <StatusSpalte key={status} status={status}
-                  anfragen={sichtbarGefiltert.filter((a) => a.status===status)}
+            <>
+              <RueckfragenLeiste anfragen={rueckfragen} onOeffnen={setKlaerungAnfrage} />
+              <div className="spalten-grid spalten-grid-4">
+                <StatusSpalte key="Offen-bs" status="Offen" standort={STANDORT_BS}
+                  anfragen={sichtbarGefiltert.filter((a) => a.status==='Offen' && standortVon(a)===STANDORT_BS)}
                   isReadOnly={isReadOnly} currentUser={currentUser} onCardClick={setSelectedAnfrage}
-                  onMove={cardMove} onSetSchritt={cardSetSchritt} onWeiterleiten={setWeiterleitenAnfrage} />
-              ))}
-            </div>
+                  onMove={cardMove} onSetSchritt={cardSetSchritt} onWeiterleiten={setWeiterleitenAnfrage}
+                  onKlaerung={setKlaerungAnfrage} />
+                <StatusSpalte key="Offen-sto" status="Offen" standort={STANDORT_STO}
+                  anfragen={sichtbarGefiltert.filter((a) => a.status==='Offen' && standortVon(a)===STANDORT_STO)}
+                  isReadOnly={isReadOnly} currentUser={currentUser} onCardClick={setSelectedAnfrage}
+                  onMove={cardMove} onSetSchritt={cardSetSchritt} onWeiterleiten={setWeiterleitenAnfrage}
+                  onKlaerung={setKlaerungAnfrage} />
+                {SPALTEN.filter((status) => status !== 'Offen').map((status) => (
+                  <StatusSpalte key={status} status={status}
+                    anfragen={sichtbarGefiltert.filter((a) => a.status===status)}
+                    isReadOnly={isReadOnly} currentUser={currentUser} onCardClick={setSelectedAnfrage}
+                    onMove={cardMove} onSetSchritt={cardSetSchritt} onWeiterleiten={setWeiterleitenAnfrage}
+                    onKlaerung={setKlaerungAnfrage} />
+                ))}
+              </div>
+            </>
           ) : (
             <Muelleimer anfragen={muelleimerGefiltert} isReadOnly={isReadOnly}
               onCardClick={setSelectedAnfrage} onZurueckholen={zurueckholen} />
@@ -675,10 +868,17 @@ function Dashboard() {
             onClose={() => setSelectedAnfrage(null)} onSave={updateAnfrage}
             onStatusChange={(a,s) => cardMove(a,s)} onDelete={deleteAnfrage}
             onWeiterleiten={() => setWeiterleitenAnfrage(selectedAnfrage)}
+            onKlaerung={() => { const a = selectedAnfrage; setSelectedAnfrage(null); setKlaerungAnfrage(a); }}
             onEntwurfErstellen={() => setDraftOhneErgebnisAnfrage(selectedAnfrage)} />
         )}
         {weiterleitenAnfrage && (
           <WeiterleitenModal anfrage={weiterleitenAnfrage} onClose={() => setWeiterleitenAnfrage(null)} onConfirm={weiterleiten} />
+        )}
+        {klaerungLive && (
+          <KlaerungModal anfrage={klaerungLive} isReadOnly={isReadOnly}
+            onClose={() => setKlaerungAnfrage(null)}
+            onSenden={(text, opt) => klaerungSenden(klaerungLive, text, opt)}
+            onSchliessen={() => klaerungSchliessen(klaerungLive)} />
         )}
         {ergebnisAnfrage && (
           <ErgebnisModal anfrage={ergebnisAnfrage} onClose={() => setErgebnisAnfrage(null)} onConfirm={cardErledigt} />
@@ -707,7 +907,7 @@ function Dashboard() {
 // ====================================================================
 // Kopfzeile
 // ====================================================================
-function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeute, letzteAenderung, currentUser, setCurrentUser, isReadOnly, suchbegriff, setSuchbegriff, onNeu, onRefresh }) {
+function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeute, rueckfragenCount, letzteAenderung, currentUser, setCurrentUser, isReadOnly, suchbegriff, setSuchbegriff, onNeu, onRefresh }) {
   const aenderungsZeit = letzteAenderung ? letzteAenderung.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}) : '—';
   return (
     <div className="kopfzeile">
@@ -722,6 +922,9 @@ function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeut
           <div className="chip chip-gruen"><Check size={13} /><span>{erledigtHeute} erledigt</span></div>
           {weitergeleitetHeute > 0 && (
             <div className="chip chip-lila"><Send size={13} /><span>{weitergeleitetHeute} weitergeleitet</span></div>
+          )}
+          {rueckfragenCount > 0 && (
+            <div className="chip rf-zeile-chip"><MessageSquare size={13} /><span>{rueckfragenCount} Rückfrage{rueckfragenCount===1?'':'n'}</span></div>
           )}
         </div>
       </div>
@@ -747,7 +950,7 @@ function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeut
 // ====================================================================
 // StatusSpalte (Box mit farbigem Kopf)
 // ====================================================================
-function StatusSpalte({ status, standort, anfragen, isReadOnly, currentUser, onCardClick, onMove, onSetSchritt, onWeiterleiten }) {
+function StatusSpalte({ status, standort, anfragen, isReadOnly, currentUser, onCardClick, onMove, onSetSchritt, onWeiterleiten, onKlaerung }) {
   const meta = SPALTEN_META[status];
   const istTodoSpalte = status === 'To Do';
   const [todoTab, setTodoTab] = useState(() => localStorage.getItem('todoSpalteTab') || 'todo');
@@ -765,8 +968,7 @@ function StatusSpalte({ status, standort, anfragen, isReadOnly, currentUser, onC
   const Icon = zeigtOsteo ? Calendar : meta.icon;
   const kopfFarbe = zeigtOsteo ? 'var(--osteo)' : meta.farbe;
   const kopfTitel = zeigtOsteo ? 'Osteo-Termine'
-    : standort === 'bad-schwartau' ? 'Offen · Bad Schwartau'
-    : standort === 'stockelsdorf' ? 'Offen · Stockelsdorf'
+    : standort ? 'Offen · ' + standortName(standort)
     : status;
 
   return (
@@ -793,7 +995,8 @@ function StatusSpalte({ status, standort, anfragen, isReadOnly, currentUser, onC
         <div className="spalte-karten">
           {anfragen.map((a) => (
             <AnfragenKarte key={a.id} anfrage={a} spalte={status} isReadOnly={isReadOnly}
-              onClick={() => onCardClick(a)} onMove={onMove} onSetSchritt={onSetSchritt} onWeiterleiten={onWeiterleiten} />
+              onClick={() => onCardClick(a)} onMove={onMove} onSetSchritt={onSetSchritt}
+              onWeiterleiten={onWeiterleiten} onKlaerung={onKlaerung} />
           ))}
           {anfragen.length===0 && <p className="spalte-leer">Keine Einträge</p>}
         </div>
@@ -805,7 +1008,7 @@ function StatusSpalte({ status, standort, anfragen, isReadOnly, currentUser, onC
 // ====================================================================
 // AnfragenKarte (mit Workflow-Buttons + Schritt-Etikett)
 // ====================================================================
-function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchritt, onWeiterleiten }) {
+function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchritt, onWeiterleiten, onKlaerung }) {
   const [schrittOffen, setSchrittOffen] = useState(false);
   const prio = PRIO_STYLE[anfrage.prioritaet] || PRIO_STYLE.Normal;
   const istTodo = spalte==='To Do';
@@ -823,6 +1026,19 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
     && (Date.now() - sofortAnker.getTime()) >= 60 * 60 * 1000;
   const stop = (e, fn) => { e.stopPropagation(); fn(); };
   const schritte = istTodo ? SCHRITTE_HAENGT : SCHRITTE_AKTIV;
+  // Standort-Rückfrage: Zeile auf der Karte + Button in jeder Spalte. Die Karte
+  // bleibt dabei bewusst dort, wo sie ist — sie wandert nicht zum anderen Standort.
+  const klaerung = klaerungVon(anfrage);
+  const rfOffen = !!klaerung && klaerung.status === 'offen';
+  const rfBeantwortet = !!klaerung && klaerung.status === 'beantwortet';
+  const rfTitel = rfOffen ? 'Rückfrage beantworten'
+    : rfBeantwortet ? 'Antwort ansehen'
+    : 'Rückfrage an ' + standortName(andererStandort(standortVon(anfrage)));
+  const rfButton = (
+    <button className="akt-rf" title={rfTitel} onClick={(e) => stop(e, () => onKlaerung && onKlaerung(anfrage))}>
+      {rfBeantwortet ? <MessageSquare size={12} /> : <HelpCircle size={12} />}
+    </button>
+  );
 
   return (
     <div className={'karte'+(istTodo?' karte-todo':'')+(sofortUeberfaellig?' karte-sofort-alarm':'')} onClick={onClick}
@@ -831,7 +1047,7 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
         <div className="karte-sofort-banner"><AlertTriangle size={12} /> Überfällig</div>
       )}
       <div className="karte-standort">
-        <MapPin size={11} /> {istBadSchwartauAnfrage(anfrage) ? 'Bad Schwartau' : 'Stockelsdorf'}
+        <MapPin size={11} /> {standortName(standortVon(anfrage))}
       </div>
       <div className="karte-kopf">
         <span className="karte-name">{anfrage.name}</span>
@@ -839,6 +1055,19 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
           : <span className="karte-prio" style={{ color:prio.text, background:prio.bg }}>{anfrage.prioritaet}</span>}
       </div>
       <p className="karte-anliegen">{bereinigeAnliegen(anfrage.anliegen)}</p>
+
+      {rfOffen && (
+        <div className="karte-klaerung">
+          <HelpCircle size={11} />
+          <span>Rückfrage an {standortName(klaerung.an)} · wartet {wartedauerLabel(klaerungWartetMin(anfrage))}</span>
+        </div>
+      )}
+      {rfBeantwortet && (
+        <div className="karte-klaerung klaerung-antwort">
+          <MessageSquare size={11} />
+          <span>Antwort von {standortName(klaerung.an)} liegt vor</span>
+        </div>
+      )}
 
       {(istBearb || istTodo) && (
         <div className="karte-schritt-zeile" onClick={(e) => e.stopPropagation()}>
@@ -899,12 +1128,14 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
           {spalte==='Offen' && (
             <>
               <button className="akt-haupt" onClick={(e) => stop(e, () => onMove(anfrage,'In Bearbeitung'))}>Übernehmen <ArrowRight size={12} /></button>
+              {rfButton}
               <button className="akt-lila" title="An Oliver/Hanna weiterleiten" onClick={(e) => stop(e, () => onWeiterleiten(anfrage))}><Send size={12} /></button>
             </>
           )}
           {spalte==='In Bearbeitung' && (
             <>
               <button className="akt-grau" title="Zurück zu Offen" onClick={(e) => stop(e, () => onMove(anfrage,'Offen'))}><ArrowLeft size={12} /></button>
+              {rfButton}
               <button className="akt-todo" onClick={(e) => stop(e, () => onMove(anfrage,'To Do'))}>To Do <ArrowRight size={12} /></button>
               <button className="akt-fertig" title="Erledigt" onClick={(e) => stop(e, () => onMove(anfrage,'Erledigt'))}><Check size={12} /></button>
             </>
@@ -912,6 +1143,7 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
           {spalte==='To Do' && (
             <>
               <button className="akt-grau" title="Zurück zu In Bearbeitung" onClick={(e) => stop(e, () => onMove(anfrage,'In Bearbeitung'))}><ArrowLeft size={12} /></button>
+              {rfButton}
               <button className="akt-fertig akt-breit" onClick={(e) => stop(e, () => onMove(anfrage,'Erledigt'))}><Check size={12} /> Erledigt</button>
             </>
           )}
@@ -1016,6 +1248,157 @@ function UebergabeNotizen({ notizen, isReadOnly, onAdd, onDelete }) {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+// ====================================================================
+// RueckfragenLeiste — alle offenen/beantworteten Standort-Rückfragen
+// ====================================================================
+// Bewusst eine gemeinsame Leiste mit Richtungsangabe statt zweier
+// standortspezifischer Spalten: das Dashboard hat keinen Standort-Login
+// (ein Board, ein Kennwort, beide Standorte schauen auf dieselbe Ansicht),
+// deshalb ist „wer fragt wen" die einzige verlässliche Information. Die
+// Leiste steht über dem Board und ist immer sichtbar, damit keine
+// Rückfrage untergeht (das Board aktualisiert sich alle 60 Sekunden).
+function RueckfragenLeiste({ anfragen, onOeffnen }) {
+  if (!anfragen.length) return null;
+  return (
+    <div className="rf-leiste">
+      <div className="rf-leiste-kopf">
+        <MessageSquare size={13} /> Rückfragen zwischen den Standorten ({anfragen.length})
+      </div>
+      <div className="rf-leiste-liste">
+        {anfragen.map((a) => {
+          const k = klaerungVon(a);
+          if (!k) return null;
+          const beantwortet = k.status === 'beantwortet';
+          const letzter = klaerungLetzterEintrag(a);
+          const wartet = klaerungWartetMin(a);
+          // Ab 2 Stunden ohne Reaktion wird die Wartezeit rot — reine
+          // Sichtbarkeit, keine automatische Eskalation.
+          const laenger = !beantwortet && wartet !== null && wartet >= 120;
+          // Anzeige immer in Fließrichtung der letzten Nachricht:
+          // offen  -> fragender Standort zeigt auf den gefragten
+          // Antwort -> gefragter Standort zeigt zurück auf den fragenden
+          const links = beantwortet ? k.an : k.von;
+          const rechts = beantwortet ? k.von : k.an;
+          return (
+            <button key={a.id} type="button" className={'rf-zeile'+(beantwortet?' rf-zeile-antwort':'')}
+              onClick={() => onOeffnen(a)}>
+              <span className="rf-zeile-name">{a.name || '(ohne Name)'}</span>
+              <span className="rf-zeile-richtung">
+                <MapPin size={10} /> {standortName(links)} <ArrowRight size={10} /> {standortName(rechts)}
+              </span>
+              <span className="rf-zeile-text">{letzter ? letzter.text : ''}</span>
+              <span className={'rf-zeile-chip'+(beantwortet?' rf-chip-antwort':'')+(laenger?' rf-zeile-alt':'')}>
+                {beantwortet ? 'Antwort da' : 'wartet ' + wartedauerLabel(wartet)}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ====================================================================
+// KlaerungModal — Rückfrage stellen, beantworten, zurückschicken, schließen
+// ====================================================================
+// Ein Modal für alle vier Fälle, gesteuert über den Status der Klärung:
+//   keine/geschlossen -> neue Rückfrage an den anderen Standort
+//   offen             -> beantworten, zurückfragen (Richtungstausch) oder
+//                        direkt als geklärt schließen (z.B. telefonisch geklärt)
+//   beantwortet       -> nochmal nachfragen oder als geklärt schließen
+// Zurückschicken ist damit kein Sonderfall, sondern dieselbe Aktion mit
+// getauschter Richtung — beliebig oft wiederholbar, alles im Verlauf.
+function KlaerungModal({ anfrage, isReadOnly, onClose, onSenden, onSchliessen }) {
+  const k = klaerungVon(anfrage);
+  const aktiv = !!k && k.status !== 'geschlossen';
+  const offen = aktiv && k.status === 'offen';
+  const beantwortet = aktiv && k.status === 'beantwortet';
+  const [text, setText] = useState('');
+  const zielNeu = andererStandort(standortVon(anfrage));
+  const hatText = !!text.trim();
+  const senden = (richtung, tauschen) => { if (!hatText) return; onSenden(text, { richtung, tauschen }); };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal modal-schmal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-kopf modal-kopf-rf">
+          <h2>{offen ? 'Rückfrage beantworten' : beantwortet ? 'Antwort auf die Rückfrage' : 'Rückfrage an den anderen Standort'}</h2>
+          <button onClick={onClose} aria-label="Schliessen"><X size={20} /></button>
+        </div>
+        <div className="modal-body">
+          <p className="erg-name">{anfrage.name || '(ohne Name)'}</p>
+          <div className="rf-ziel">
+            <MapPin size={15} />
+            {aktiv ? (
+              <span>
+                Rückfrage von <strong>{standortName(k.von)}</strong> an <strong>{standortName(k.an)}</strong>
+                {offen ? ' · wartet ' + wartedauerLabel(klaerungWartetMin(anfrage)) : ' · beantwortet'}
+              </span>
+            ) : (
+              <span>Karte gehört zu <strong>{standortName(standortVon(anfrage))}</strong> — Frage geht an <strong>{standortName(zielNeu)}</strong></span>
+            )}
+          </div>
+
+          {aktiv && k.verlauf.length > 0 && (
+            <div className="rf-verlauf">
+              {k.verlauf.map((e, i) => (
+                <div key={i} className={'rf-eintrag rf-eintrag-'+(e.richtung === 'antwort' ? 'antwort' : 'frage')}>
+                  <div className="rf-eintrag-kopf">
+                    {e.richtung === 'antwort' ? <MessageSquare size={10} /> : <HelpCircle size={10} />}
+                    {e.richtung === 'antwort' ? 'Antwort' : 'Frage'} · {standortName(normStandort(e.von))} · {e.autor || '—'} · {datumUhrzeit(e.zeit)}
+                  </div>
+                  <div className="rf-eintrag-text">{e.text}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!isReadOnly && (
+            <div className="feld">
+              <label>{offen ? 'Antwort' : beantwortet ? 'Weitere Frage' : 'Was soll geklärt werden?'}</label>
+              <textarea rows={3} autoFocus value={text} onChange={(e) => setText(e.target.value)}
+                placeholder={offen ? 'z. B. Patientin war zuletzt am 12.08. bei Finn, Rezept liegt hier.' : 'z. B. Ist die Patientin bei euch schon in Behandlung?'} />
+            </div>
+          )}
+          {isReadOnly && <p className="rf-hinweis">Nur-Lese-Zugriff: Rückfragen können hier nicht beantwortet werden.</p>}
+          {!isReadOnly && (
+            <p className="rf-hinweis">
+              Die Karte bleibt bei <strong>{standortName(standortVon(anfrage))}</strong> und in ihrer Spalte —
+              es wechselt nur, wer als Nächstes antworten muss.
+            </p>
+          )}
+        </div>
+        {!isReadOnly && (
+          <div className="modal-fuss">
+            <button className="abbrechen-btn" onClick={onClose}>Abbrechen</button>
+            <div className="rf-fuss-mehr">
+              {aktiv && (
+                <button className="rf-btn-zurueck" onClick={onSchliessen} title="Rückfrage ist geklärt">
+                  <Check size={14} /> Geklärt
+                </button>
+              )}
+              {offen && (
+                <button className="rf-btn-zurueck" disabled={!hatText} onClick={() => senden('frage', true)}
+                  title={'Stattdessen zurückfragen an ' + standortName(k.von)}>
+                  <CornerUpLeft size={14} /> Frage zurück
+                </button>
+              )}
+              <button className="rf-btn-primaer" disabled={!hatText}
+                onClick={() => senden(offen ? 'antwort' : 'frage', false)}>
+                {offen
+                  ? <><MessageSquare size={14} /> Antwort an {standortName(k.von)}</>
+                  : beantwortet
+                    ? <><HelpCircle size={14} /> Nochmal fragen</>
+                    : <><HelpCircle size={14} /> Rückfrage an {standortName(zielNeu)}</>}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1274,8 +1657,11 @@ function ErgebnisModal({ anfrage, onClose, onConfirm }) {
 // ====================================================================
 // AnfragenModal (Detail / Edit)
 // ====================================================================
-function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, onDelete, onWeiterleiten, onEntwurfErstellen }) {
-  const [form, setForm] = useState({ ...anfrage });
+function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, onDelete, onWeiterleiten, onKlaerung, onEntwurfErstellen }) {
+  // Standort wird beim Öffnen explizit vorbelegt (bisher abgeleiteter Wert) —
+  // Speichern schreibt ihn damit als echtes Feld fest, ohne dass sich die
+  // Zuordnung ändert.
+  const [form, setForm] = useState({ ...anfrage, standort: standortVon(anfrage) });
   const [showHistory, setShowHistory] = useState(false);
   const set = (k,v) => setForm((f) => ({ ...f, [k]: v }));
   const schritte = form.status==='To Do' ? SCHRITTE_HAENGT : SCHRITTE_AKTIV;
@@ -1321,6 +1707,19 @@ function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, o
             <label>Anliegen</label>
             {isReadOnly ? <p className="feld-wert">{bereinigeAnliegen(anfrage.anliegen)}</p>
               : <textarea value={form.anliegen} onChange={(e) => set('anliegen', e.target.value)} rows={2} />}
+          </div>
+          <div className="feld">
+            <label>Standort</label>
+            {isReadOnly ? <p className="feld-wert">{standortName(standortVon(anfrage))}</p> : (
+              <div className="rf-standort-wahl">
+                {STANDORT_WAHL.map((s) => (
+                  <button key={s} type="button" className={'rf-standort-btn'+(form.standort===s?' aktiv':'')}
+                    onClick={() => set('standort', s)}>
+                    <MapPin size={13} /> {standortName(s)}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="feld">
             <label>Status</label>
@@ -1414,6 +1813,9 @@ function AnfragenModal({ anfrage, isReadOnly, onClose, onSave, onStatusChange, o
               {zeigtEntwurfButton && (
                 <button className="wl-btn" title="Mail-Entwurf in Outlook vorbereiten" onClick={onEntwurfErstellen}><Mail size={14} /> Entwurf erstellen</button>
               )}
+              <button className="wl-btn" onClick={onKlaerung} title={'Rückfrage an ' + standortName(andererStandort(standortVon(anfrage)))}>
+                <HelpCircle size={14} /> Rückfrage
+              </button>
               <button className="wl-btn" onClick={onWeiterleiten}><Send size={14} /> Weiterleiten</button>
               <button className="speichern-btn" onClick={() => onSave(form)}>Speichern</button>
             </div>
@@ -1437,9 +1839,21 @@ function InfoCard({ icon, label, value }) {
 // NeueAnfrageForm
 // ====================================================================
 function NeueAnfrageForm({ onClose, onSubmit, onMerge, checkDuplicate }) {
-  const [form, setForm] = useState({ name:'', telefon:'', email:'', anliegen:'', prioritaet:'Normal', quelle:'Manuell erfasst' });
+  // Standort der neuen Karte: bisher wurde er nur geraten (Freitext „Bad
+  // Schwartau" im Anliegen), manuell erfasste Karten landeten deshalb praktisch
+  // immer in Stockelsdorf. Jetzt explizit wählbar. Die letzte Wahl wird pro
+  // Browser gemerkt — damit ist am Rechner in Bad Schwartau standardmäßig
+  // „Bad Schwartau" vorbelegt, ohne dass es dafür einen Standort-Login braucht.
+  const [form, setForm] = useState(() => ({
+    name:'', telefon:'', email:'', anliegen:'', prioritaet:'Normal', quelle:'Manuell erfasst',
+    standort: normStandort(localStorage.getItem('standortDefault')) || STANDORT_STO,
+  }));
   const [duplikat, setDuplikat] = useState(null);
   const set = (k,v) => setForm((f) => ({ ...f, [k]: v }));
+  const setStandort = (s) => {
+    set('standort', s);
+    try { localStorage.setItem('standortDefault', s); } catch {}
+  };
   const absenden = () => {
     if (!form.name.trim()) { alert('Name ist erforderlich'); return; }
     const dup = checkDuplicate(form.name, form.telefon);
@@ -1469,6 +1883,17 @@ function NeueAnfrageForm({ onClose, onSubmit, onMerge, checkDuplicate }) {
           <div className="feld-reihe">
             <div className="feld"><label>Telefon</label><input type="tel" value={form.telefon} onChange={(e) => set('telefon', e.target.value)} /></div>
             <div className="feld"><label>E-Mail</label><input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} /></div>
+          </div>
+          <div className="feld">
+            <label>Standort *</label>
+            <div className="rf-standort-wahl">
+              {STANDORT_WAHL.map((s) => (
+                <button key={s} type="button" className={'rf-standort-btn'+(form.standort===s?' aktiv':'')}
+                  onClick={() => setStandort(s)}>
+                  <MapPin size={13} /> {standortName(s)}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="feld"><label>Anliegen</label><textarea value={form.anliegen} onChange={(e) => set('anliegen', e.target.value)} rows={2} /></div>
           <div className="feld-reihe">
