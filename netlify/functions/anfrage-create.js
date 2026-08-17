@@ -18,7 +18,7 @@ const { google } = require('googleapis');
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const FLOW_API_KEY = process.env.FLOW_API_KEY;
 
-// Spalten-Reihenfolge MUSS exakt dem Sheet-Schema A..T entsprechen.
+// Spalten-Reihenfolge MUSS exakt dem Sheet-Schema A..AA entsprechen.
 // P (__powerAppsId) bleibt beim Anhängen leer — der Google-Connector des
 // Weiterleitungs-Flows verwaltet/befüllt diese Spalte selbst.
 // S (letzterReminder) und T (ergebnis) bleiben bei Neuanlage leer.
@@ -48,7 +48,25 @@ const COLUMNS = [
   'utm_campaign',     // W
   'utm_content',      // X
   'gclid',            // Y
+  'standort',         // Z   (explizites Standort-Feld, siehe normStandort)
+  'klaerung',         // AA  (Standort-Rueckfrage, bei Neuanlage immer leer)
 ];
+
+// ---- Standort-Slug normalisieren (IDENTISCH zum Dashboard / App.jsx) ----
+// Seit 17.08.2026 gibt es zusaetzlich zum bisherigen Text-Tag im Anliegen
+// (siehe mitStandortTag) ein echtes Standort-Feld in Spalte Z. Beide Wege
+// werden bewusst parallel geschrieben: das Tag bleibt fuer Altzeilen und die
+// Text-Erkennung im Dashboard erhalten, das Feld ist die neue, eindeutige
+// Quelle (und die Basis fuer Rueckfragen zwischen den Standorten).
+// Akzeptiert 'Bad Schwartau', 'bad-schwartau', 'badschwartau', 'Stockelsdorf'
+// — alles andere (auch leer) ergibt '' und faellt im Dashboard auf die
+// bisherige Text-Erkennung zurueck.
+function normStandort(roh) {
+  const s = String(roh || '').trim().toLowerCase().replace(/[\s_]+/g, '-');
+  if (s === 'bad-schwartau' || s === 'badschwartau') return 'bad-schwartau';
+  if (s === 'stockelsdorf') return 'stockelsdorf';
+  return '';
+}
 
 // ---- Telefon-Normalisierung (IDENTISCH zum Dashboard / App.jsx) ----
 function normalizeTelefon(roh) {
@@ -114,6 +132,29 @@ function istPrivatVersichertAnfrage(anliegen) {
 // bewusst ALS LETZTES ausgewertet.
 function istTerminabsage(anliegen) {
   return /termin\s*absage/i.test(String(anliegen || ''));
+}
+
+// ---- Standort-Tag ergänzen, falls Flow #1 einen Standort erkannt hat ----
+// Hintergrund (05.08.2026 / Oliver-Report "Bad Schwartau landet nicht im
+// Dashboard"): Placetel schreibt den Standort zuverlässig in den Betreff
+// der Notification-Mail ("Bad Schwartau: Rückrufbitte: ..."), Flow #1
+// wertete das bisher nirgends aus. Seit dem 17.08.2026 sendet Flow #1
+// zusätzlich ein Feld `standort` im Payload (Wert 'Bad Schwartau' oder '').
+// istBadSchwartauAnfrage() im Dashboard (src/App.jsx) erkennt bereits heute
+// zuverlässig das Tag "Standort: Bad Schwartau" IRGENDWO im Anliegen-Text
+// (u.a. genutzt vom Bad-Schwartau-Terminformular, siehe termin.html) — hier
+// wird also bewusst dieselbe, bereits bekannte Tag-Form genutzt statt einer
+// neuen Sheet-Spalte. Rein additiv: greift nur, wenn (a) Flow #1 tatsächlich
+// 'Bad Schwartau' mitschickt UND (b) das Anliegen dieses Tag nicht schon
+// selbst enthält (verhindert doppeltes Tag, falls z.B. der Anrufer den
+// Standort auch im Freitext genannt hat und das Frontend das ohnehin schon
+// per Freitext-Fallback erkennen würde).
+function mitStandortTag(anliegen, standort) {
+  const text = String(anliegen || '');
+  const ort = String(standort || '').trim();
+  if (!ort) return text;
+  if (text.includes('Standort: ' + ort)) return text; // bereits getaggt
+  return 'Standort: ' + ort + (text ? ('  ' + text) : '');
 }
 
 function getSheets() {
@@ -265,6 +306,8 @@ exports.handler = async (event) => {
     ? 'Niedrig'
     : prioritaetVorPruefung;
 
+  const anliegenMitStandort = mitStandortTag(payload.anliegen, payload.standort);
+
   const obj = {
     id: payload.id || ('mail-' + Date.now()),
     eingangsdatum: payload.eingangsdatum || new Date().toISOString().slice(0, 10),
@@ -272,7 +315,7 @@ exports.handler = async (event) => {
     name: payload.name || '',
     telefon: telFinal,
     email: payload.email || '',
-    anliegen: (payload.anliegen || '') + (telIstPraxis ? ' ⚠️ Rückrufnummer fehlt (Praxisnummer übergeben – bitte beim Patienten erfragen)' : ''),
+    anliegen: anliegenMitStandort + (telIstPraxis ? ' ⚠️ Rückrufnummer fehlt (Praxisnummer übergeben – bitte beim Patienten erfragen)' : ''),
     prioritaet: prioritaetFinal,
     status: 'Offen',           // immer Offen bei Neuanlage
     bearbeiter: 'Unzugewiesen', // immer Unzugewiesen bei Neuanlage
@@ -291,6 +334,8 @@ exports.handler = async (event) => {
     utm_campaign: payload.utm_campaign || '', // W
     utm_content:  payload.utm_content  || '', // X
     gclid:        payload.gclid        || '', // Y
+    standort:     normStandort(payload.standort), // Z  (leer = Text-Fallback im Dashboard)
+    klaerung:     '',    // AA leer (Rueckfragen entstehen erst im Dashboard)
   };
 
   const row = COLUMNS.map((k) => (obj[k] !== undefined && obj[k] !== null ? String(obj[k]) : ''));
