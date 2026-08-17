@@ -8,8 +8,19 @@ const { google } = require('googleapis');
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 // Tab-Name wird dynamisch ermittelt (robust gegen 'Tabellenblatt1' vs 'Sheet1')
 
-// Spalten-Reihenfolge entspricht dem Sheet-Schema A..Y
+// Spalten-Reihenfolge entspricht dem Sheet-Schema A..AA
 // P (__PowerAppsId__) wird vom Google-Connector verwaltet und transparent durchgereicht.
+// Z  (standort) und AA (klaerung) sind am 17.08.2026 ergänzt worden:
+//   - standort: expliziter Standort der Karte ('bad-schwartau' | 'stockelsdorf').
+//     Vorher wurde der Standort ausschliesslich aus dem Anliegen-Text bzw.
+//     utm_campaign geraten (istBadSchwartauAnfrage in src/App.jsx). Diese Text-
+//     Erkennung bleibt als Fallback erhalten, damit Altzeilen und alle
+//     automatischen Wege unveraendert korrekt einsortiert werden.
+//     ACHTUNG: Spalte Z trug bis zur Kruse-Entfernung die DSGVO-Einwilligung
+//     ("Ja"/"Nein"). Reste davon werden bewusst ignoriert — das Frontend
+//     akzeptiert nur die beiden bekannten Standort-Slugs, alles andere gilt als
+//     leer und wird beim naechsten vollen Speichern ueberschrieben.
+//   - klaerung: JSON der Standort-Rueckfrage ({von,an,status,verlauf}) oder leer.
 const COLUMNS = [
   'id',
   'eingangsdatum',
@@ -36,7 +47,18 @@ const COLUMNS = [
   'utm_campaign',
   'utm_content',
   'gclid',
+  'standort',
+  'klaerung',
 ];
+
+// Sheet-Raster muss bis Spalte AA reichen (27 Spalten). Ein frisches Google
+// Sheet hat 26 (A..Z) — fehlt Platz, wird er beim ersten Lesen automatisch
+// angelegt, damit niemand die Spalten manuell nachziehen muss.
+const SPALTEN_ANZAHL = 27;
+const LETZTE_SPALTE = 'AA';
+const KOPFZEILEN = { 25: 'Standort', 26: 'Klärung' }; // Index -> Header-Text (Z, AA)
+// Nur einmal pro Function-Instanz nachziehen (kein Schreib-Call pro Request).
+let kopfzeilenGeprueft = false;
 
 // ---- Auth (Service Account) ----
 function getAuth() {
@@ -52,11 +74,60 @@ function getSheets() {
   return google.sheets({ version: 'v4', auth });
 }
 
-// Ersten Tab-Namen ermitteln (robust gegen Sprach-/Namensunterschiede)
+// Ersten Tab-Namen ermitteln (robust gegen Sprach-/Namensunterschiede) und
+// dabei sicherstellen, dass das Raster bis Spalte AA reicht. Das Verbreitern
+// ist idempotent: es passiert nur, wenn wirklich Spalten fehlen.
 async function ersterTabName(sheets, spreadsheetId) {
-  const meta = await sheets.spreadsheets.get({ spreadsheetId, fields: 'sheets.properties.title' });
-  const titel = meta.data.sheets && meta.data.sheets[0] && meta.data.sheets[0].properties.title;
-  return titel || 'Tabelle1';
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: 'sheets.properties(sheetId,title,gridProperties)',
+  });
+  const props = (meta.data.sheets && meta.data.sheets[0] && meta.data.sheets[0].properties) || {};
+  const titel = props.title || 'Tabelle1';
+  const spalten = (props.gridProperties && props.gridProperties.columnCount) || 0;
+  if (props.sheetId !== undefined && spalten > 0 && spalten < SPALTEN_ANZAHL) {
+    try {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          requests: [{
+            appendDimension: {
+              sheetId: props.sheetId,
+              dimension: 'COLUMNS',
+              length: SPALTEN_ANZAHL - spalten,
+            },
+          }],
+        },
+      });
+    } catch (e) {
+      // Nicht fatal: das Lesen/Schreiben scheitert dann sichtbar mit einer
+      // klaren Google-Fehlermeldung, statt hier still zu bleiben.
+      console.error('Spalten konnten nicht ergaenzt werden:', e && e.message);
+    }
+  }
+  return titel;
+}
+
+// Header-Texte fuer die beiden neuen Spalten nachziehen, falls leer. Nur
+// einmal pro Function-Instanz und nur, wenn wirklich etwas fehlt.
+async function kopfzeilenSicherstellen(sheets, tab, header) {
+  if (kopfzeilenGeprueft) return;
+  kopfzeilenGeprueft = true;
+  const daten = Object.entries(KOPFZEILEN)
+    .filter(([idx]) => !String((header || [])[Number(idx)] || '').trim())
+    .map(([idx, text]) => ({
+      range: tab + '!' + (Number(idx) === 25 ? 'Z' : 'AA') + '1',
+      values: [[text]],
+    }));
+  if (!daten.length) return;
+  try {
+    await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId: SHEET_ID,
+      requestBody: { valueInputOption: 'USER_ENTERED', data: daten },
+    });
+  } catch (e) {
+    console.error('Kopfzeilen konnten nicht gesetzt werden:', e && e.message);
+  }
 }
 
 
@@ -72,6 +143,14 @@ function rowToObject(row) {
   } catch (e) {
     obj.history = [];
   }
+  // Klaerung (Standort-Rueckfrage) als JSON parsen, leer => null
+  try {
+    const roh = obj.klaerung;
+    const parsed = roh ? JSON.parse(roh) : null;
+    obj.klaerung = parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (e) {
+    obj.klaerung = null;
+  }
   return obj;
 }
 
@@ -80,6 +159,10 @@ function objectToRow(a) {
   return COLUMNS.map((key) => {
     if (key === 'history') {
       return JSON.stringify(a.history || []);
+    }
+    if (key === 'klaerung') {
+      // Leere Klaerung als leere Zelle speichern (nicht als "null"-String)
+      return a.klaerung && typeof a.klaerung === 'object' ? JSON.stringify(a.klaerung) : '';
     }
     return a[key] !== undefined && a[key] !== null ? String(a[key]) : '';
   });
@@ -111,15 +194,20 @@ exports.handler = async (event) => {
   try {
     const sheets = getSheets();
     const tab = await ersterTabName(sheets, SHEET_ID);
-    const RANGE = tab + '!A2:Y1000';
+    const RANGE = tab + '!A2:' + LETZTE_SPALTE + '1000';
 
     // -------------------- READ --------------------
     if (event.httpMethod === 'GET') {
+      // Bewusst ab Zeile 1 lesen: so laesst sich in einem Call pruefen, ob die
+      // Header der neuen Spalten (Z/AA) schon stehen — ohne Extra-Request.
       const res = await sheets.spreadsheets.values.get({
         spreadsheetId: SHEET_ID,
-        range: RANGE,
+        range: tab + '!A1:' + LETZTE_SPALTE + '1000',
       });
-      const rows = res.data.values || [];
+      const alle = res.data.values || [];
+      const header = alle[0] || [];
+      const rows = alle.slice(1);
+      await kopfzeilenSicherstellen(sheets, tab, header);
       const data = rows
         .filter((r) => r && r.length > 0 && r[0])
         .map(rowToObject);
@@ -130,7 +218,39 @@ exports.handler = async (event) => {
     if (event.httpMethod === 'POST') {
       const payload = JSON.parse(event.body || '{}');
       const anfragen = Array.isArray(payload.anfragen) ? payload.anfragen : [];
-      const values = anfragen.map(objectToRow);
+
+      // Schutz der Standort-Rueckfragen vor dem Full-Table-Rewrite:
+      // Dieser POST schreibt die KOMPLETTE Tabelle aus dem Browser-State
+      // zurueck. Der State kann bis zu 60 Sekunden alt sein (Auto-Refresh) —
+      // eine Rueckfrage, die in diesem Fenster vom ANDEREN Standort gestellt
+      // oder beantwortet wurde, wuerde dabei verloren gehen. Die Klaerungs-
+      // Spalte wird deshalb nie aus dem Payload uebernommen, sondern immer aus
+      // dem Sheet gehalten; geschrieben wird sie ausschliesslich feldgranular
+      // durch klaerung-update.js. Zuordnung ueber die id (nicht ueber die
+      // Zeilennummer), damit Loeschen/Sortieren nichts verschiebt.
+      let klaerungImSheet = new Map();
+      try {
+        const vorher = await sheets.spreadsheets.values.get({
+          spreadsheetId: SHEET_ID,
+          range: RANGE,
+        });
+        (vorher.data.values || []).forEach((r) => {
+          const id = r && r[0];
+          const wert = r && r[COLUMNS.indexOf('klaerung')];
+          if (id && wert) klaerungImSheet.set(String(id), String(wert));
+        });
+      } catch (e) {
+        // Nicht fatal: dann gilt der Payload-Wert (bisheriges Verhalten).
+        console.error('Klaerungs-Spalte konnte nicht vorgelesen werden:', e && e.message);
+      }
+
+      const values = anfragen.map((a) => {
+        const row = objectToRow(a);
+        const idx = COLUMNS.indexOf('klaerung');
+        const ausSheet = klaerungImSheet.get(String(a.id || ''));
+        if (ausSheet) row[idx] = ausSheet;
+        return row;
+      });
 
       // Erst Datenbereich leeren, dann komplette Liste schreiben
       await sheets.spreadsheets.values.clear({

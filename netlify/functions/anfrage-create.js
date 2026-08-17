@@ -18,7 +18,7 @@ const { google } = require('googleapis');
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const FLOW_API_KEY = process.env.FLOW_API_KEY;
 
-// Spalten-Reihenfolge MUSS exakt dem Sheet-Schema A..T entsprechen.
+// Spalten-Reihenfolge MUSS exakt dem Sheet-Schema A..AA entsprechen.
 // P (__powerAppsId) bleibt beim Anhängen leer — der Google-Connector des
 // Weiterleitungs-Flows verwaltet/befüllt diese Spalte selbst.
 // S (letzterReminder) und T (ergebnis) bleiben bei Neuanlage leer.
@@ -48,7 +48,25 @@ const COLUMNS = [
   'utm_campaign',     // W
   'utm_content',      // X
   'gclid',            // Y
+  'standort',         // Z   (explizites Standort-Feld, siehe normStandort)
+  'klaerung',         // AA  (Standort-Rueckfrage, bei Neuanlage immer leer)
 ];
+
+// ---- Standort-Slug normalisieren (IDENTISCH zum Dashboard / App.jsx) ----
+// Seit 17.08.2026 gibt es zusaetzlich zum bisherigen Text-Tag im Anliegen
+// (siehe mitStandortTag) ein echtes Standort-Feld in Spalte Z. Beide Wege
+// werden bewusst parallel geschrieben: das Tag bleibt fuer Altzeilen und die
+// Text-Erkennung im Dashboard erhalten, das Feld ist die neue, eindeutige
+// Quelle (und die Basis fuer Rueckfragen zwischen den Standorten).
+// Akzeptiert 'Bad Schwartau', 'bad-schwartau', 'badschwartau', 'Stockelsdorf'
+// — alles andere (auch leer) ergibt '' und faellt im Dashboard auf die
+// bisherige Text-Erkennung zurueck.
+function normStandort(roh) {
+  const s = String(roh || '').trim().toLowerCase().replace(/[\s_]+/g, '-');
+  if (s === 'bad-schwartau' || s === 'badschwartau') return 'bad-schwartau';
+  if (s === 'stockelsdorf') return 'stockelsdorf';
+  return '';
+}
 
 // ---- Telefon-Normalisierung (IDENTISCH zum Dashboard / App.jsx) ----
 function normalizeTelefon(roh) {
@@ -316,6 +334,8 @@ exports.handler = async (event) => {
     utm_campaign: payload.utm_campaign || '', // W
     utm_content:  payload.utm_content  || '', // X
     gclid:        payload.gclid        || '', // Y
+    standort:     normStandort(payload.standort), // Z  (leer = Text-Fallback im Dashboard)
+    klaerung:     '',    // AA leer (Rueckfragen entstehen erst im Dashboard)
   };
 
   const row = COLUMNS.map((k) => (obj[k] !== undefined && obj[k] !== null ? String(obj[k]) : ''));
