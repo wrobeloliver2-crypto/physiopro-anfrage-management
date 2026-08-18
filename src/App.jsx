@@ -29,10 +29,10 @@ const KLAERUNG_URL = BACKEND_BASE + '/.netlify/functions/klaerung-update';
 const SPALTEN = ['Offen', 'In Bearbeitung', 'To Do'];
 const ALLE_STATUS = ['Offen', 'In Bearbeitung', 'To Do', 'Erledigt', 'Weitergeleitet'];
 const PRIORITAETEN = ['Sofort', 'Normal', 'Niedrig'];
-const BEARBEITER = ['Finn', 'Annika', 'Petra Drewitz', 'Vera Köhn', 'Katy', 'Unzugewiesen'];
+const BEARBEITER = ['Finn', 'Annika', 'Petra Drewitz', 'Vera Köhn', 'Antje Dreyer', 'Katy', 'Unzugewiesen'];
 const QUELLEN = ['Website', 'Telefon-Benachrichtigung', 'Manuell erfasst'];
 const READ_ONLY_USERS = ['Oliver Wrobel'];
-const ALLE_USER = ['Finn', 'Annika', 'Petra Drewitz', 'Vera Köhn', 'Katy', 'Oliver Wrobel', 'Hanna Wrobel'];
+const ALLE_USER = ['Finn', 'Annika', 'Petra Drewitz', 'Vera Köhn', 'Antje Dreyer', 'Katy', 'Oliver Wrobel', 'Hanna Wrobel'];
 
 // Bearbeitungs-Schritte, getrennt nach aktiv (In Bearbeitung) / haengt (To Do)
 const SCHRITTE_AKTIV = ['Rückruf vereinbart', 'Prüfe Terminverfügbarkeit', 'Termin wird abgestimmt'];
