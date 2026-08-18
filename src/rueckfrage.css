@@ -1,0 +1,61 @@
+/* ====================================================================
+   Rückfragen zwischen den Standorten (Bad Schwartau <-> Stockelsdorf)
+   --------------------------------------------------------------------
+   Eigene Datei, damit index.css unangetastet bleibt. Nutzt die
+   Farbvariablen aus index.css (:root) und ergänzt nur eine eigene
+   Akzentfarbe für Rückfragen — bewusst NICHT lila (das ist die
+   Weiterleitung an Oliver/Hanna) und nicht bernstein (To Do).
+   ==================================================================== */
+:root {
+  --rf:#3f6ea8; --rf-dunkel:#2d5480; --rf-hell:#eaf1f8; --rf-rand:#cfe0f0;
+  --rf-antwort:#2f7d5b; --rf-antwort-hell:#e8f4ee; --rf-antwort-rand:#c9e6d7;
+}
+
+/* ── Leiste über dem Board ── */
+.rf-leiste { border:1px solid var(--rf-rand); background:var(--rf-hell); border-radius:12px; padding:11px 14px; margin-bottom:14px; }
+.rf-leiste-kopf { display:flex; align-items:center; gap:7px; font-size:11px; font-weight:500; color:var(--rf-dunkel); text-transform:uppercase; letter-spacing:.05em; margin-bottom:9px; }
+.rf-leiste-liste { display:flex; flex-direction:column; gap:7px; }
+.rf-zeile { display:flex; align-items:center; gap:10px; background:#fff; border:1px solid var(--rf-rand); border-radius:9px; padding:8px 11px; cursor:pointer; transition:.15s; text-align:left; width:100%; font-family:var(--sans); }
+.rf-zeile:hover { border-color:var(--rf); box-shadow:0 1px 6px rgba(63,110,168,.12); }
+.rf-zeile.rf-zeile-antwort { border-color:var(--rf-antwort-rand); background:var(--rf-antwort-hell); }
+.rf-zeile.rf-zeile-antwort:hover { border-color:var(--rf-antwort); }
+.rf-zeile-name { font-size:12.5px; font-weight:500; color:var(--text); white-space:nowrap; }
+.rf-zeile-richtung { display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:500; color:var(--rf-dunkel); background:var(--rf-hell); border-radius:100px; padding:3px 9px; white-space:nowrap; }
+.rf-zeile-text { flex:1; font-size:11px; color:var(--grau); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rf-zeile-chip { font-size:9px; font-weight:500; text-transform:uppercase; letter-spacing:.04em; padding:3px 9px; border-radius:100px; white-space:nowrap; color:var(--rf-dunkel); background:var(--rf-hell); }
+.rf-zeile-chip.rf-chip-antwort { color:var(--rf-antwort); background:#dcefe5; }
+.rf-zeile-alt { color:var(--rot); }
+
+/* ── Zeile auf der Karte ── */
+.karte-klaerung { margin-top:8px; display:flex; align-items:center; gap:5px; font-size:10px; font-weight:500; color:var(--rf-dunkel); background:var(--rf-hell); border:1px solid var(--rf-rand); border-radius:100px; padding:3px 9px; width:fit-content; max-width:100%; }
+.karte-klaerung.klaerung-antwort { color:var(--rf-antwort); background:var(--rf-antwort-hell); border-color:var(--rf-antwort-rand); }
+
+/* ── Karten-Button ── */
+.akt-rf { background:var(--rf-hell); color:var(--rf-dunkel); padding:7px 10px; }
+.akt-rf:hover { background:#dfeaf6; }
+
+/* ── Modal ── */
+.modal-kopf-rf { background:var(--rf); }
+.rf-ziel { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--rf-dunkel); background:var(--rf-hell); border:1px solid var(--rf-rand); border-radius:9px; padding:10px 12px; margin-bottom:14px; }
+.rf-ziel strong { font-weight:600; }
+.rf-verlauf { display:flex; flex-direction:column; gap:8px; margin-bottom:14px; max-height:230px; overflow-y:auto; }
+.rf-eintrag { border-radius:9px; padding:9px 11px; border:1px solid var(--beige-mid); background:var(--creme); }
+.rf-eintrag.rf-eintrag-frage { border-color:var(--rf-rand); background:var(--rf-hell); }
+.rf-eintrag.rf-eintrag-antwort { border-color:var(--rf-antwort-rand); background:var(--rf-antwort-hell); }
+.rf-eintrag-kopf { display:flex; align-items:center; gap:6px; font-size:9.5px; font-weight:500; text-transform:uppercase; letter-spacing:.04em; color:var(--grau); margin-bottom:4px; }
+.rf-eintrag-text { font-size:13px; color:var(--text); line-height:1.5; white-space:pre-wrap; }
+.rf-hinweis { font-size:11px; color:var(--grau-hell); line-height:1.5; margin:10px 0 0; }
+.rf-fehler { font-size:12px; color:var(--rot); margin:10px 0 0; }
+.rf-fuss-mehr { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; }
+.rf-btn-primaer { background:var(--rf); color:#fff; border:none; border-radius:100px; padding:10px 18px; font-family:var(--sans); font-size:13px; font-weight:500; cursor:pointer; display:inline-flex; align-items:center; gap:6px; transition:.15s; }
+.rf-btn-primaer:hover:not(:disabled) { background:var(--rf-dunkel); }
+.rf-btn-primaer:disabled { opacity:.5; cursor:not-allowed; }
+.rf-btn-zurueck { background:var(--beige-warm); color:var(--beige-dunkel); border:1px solid var(--beige-mid); border-radius:100px; padding:10px 16px; font-family:var(--sans); font-size:13px; font-weight:500; cursor:pointer; display:inline-flex; align-items:center; gap:6px; transition:.15s; }
+.rf-btn-zurueck:hover:not(:disabled) { background:#f0e7da; }
+.rf-btn-zurueck:disabled { opacity:.5; cursor:not-allowed; }
+
+/* ── Standort-Wahl (Neue Anfrage / Detail-Modal) ── */
+.rf-standort-wahl { display:flex; gap:8px; }
+.rf-standort-btn { flex:1; display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:10px 12px; font-family:var(--sans); font-size:13px; font-weight:500; color:var(--grau); background:#fff; border:1px solid var(--beige-mid); border-radius:9px; cursor:pointer; transition:.15s; }
+.rf-standort-btn:hover { border-color:var(--gruen); color:var(--gruen-dunkel); }
+.rf-standort-btn.aktiv { background:var(--gruen-hell); border-color:var(--gruen); color:var(--gruen-dunkel); }
