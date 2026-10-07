@@ -10,13 +10,15 @@ const CLIENT_ID = process.env.MS_DASHBOARD_CLIENT_ID;
 const CLIENT_SECRET = process.env.MS_DASHBOARD_CLIENT_SECRET;
 const MAILBOX = process.env.MS_DASHBOARD_MAILBOX || 'info@physioproluebeck.de';
 
+const { zugriffPruefen } = require('../lib/auth.cjs');
+
 const jsonResponse = (statusCode, body) => ({
   statusCode,
   headers: {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   },
   body: JSON.stringify(body),
 });
@@ -104,6 +106,12 @@ function buildHtml({ name, behandlung }) {
 
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return jsonResponse(200, { ok: true });
+  // Zugriff nur aus dem angemeldeten Dashboard. Greift, sobald die
+  // Token-Anmeldung in diesem Kontext eingerichtet ist (DASHBOARD_TOKEN_SECRET).
+  if (process.env.DASHBOARD_TOKEN_SECRET) {
+    const verweigert = zugriffPruefen(event);
+    if (verweigert) return verweigert;
+  }
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
 
   if (!TENANT_ID || !CLIENT_ID || !CLIENT_SECRET) {
