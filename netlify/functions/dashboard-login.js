@@ -70,7 +70,14 @@ exports.handler = async (event) => {
 
   try {
     if (event.httpMethod === 'GET') {
-      const liste = await zugelassene();
+      let liste;
+      try {
+        liste = await zugelassene();
+      } catch (e) {
+        // Status 200, damit der Anmeldebildschirm den Grund anzeigen kann
+        console.error('dashboard-login GET Fehler:', e);
+        return antwort(200, { success: false, error: 'Personenliste nicht ladbar', detail: String((e && e.message) || e).slice(0, 200) });
+      }
       return antwort(200, {
         success: true,
         personen: liste.map((p) => ({
