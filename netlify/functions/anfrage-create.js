@@ -158,6 +158,27 @@ function mitStandortTag(anliegen, standort) {
   return 'Standort: ' + ort + (text ? ('  ' + text) : '');
 }
 
+// ---- Wiederholte Anrufe ohne Angaben zusammenfuehren (07.10.2026) ----
+// Hintergrund (Oliver): Ruft jemand mehrfach an, ohne etwas zu sagen
+// (Placetel: "Gespraech abgebrochen – keine verwertbaren Angaben") oder
+// bestaetigt mehrfach den SMS-Rueckruflink ("Verpasster Anruf"), entstand
+// bisher jedes Mal eine neue Karte. Jetzt: Gibt es zu derselben Nummer
+// noch eine OFFENE Karte (nicht Erledigt/Weitergeleitet), wird der Anruf
+// dort als History-Eintrag "Weiterer Anruf" angehaengt und die Karte auf
+// "Sofort" gesetzt. Das Dashboard zaehlt die Eintraege ("3× angerufen").
+// Anrufe MIT Inhalt bekommen weiterhin eine eigene Karte.
+const AKTION_WEITERER_ANRUF = 'Weiterer Anruf';
+function istAnrufOhneAngaben(obj) {
+  const name = String(obj.name || '');
+  const text = String(obj.anliegen || '');
+  if (obj.quelle === 'SMS-Rückrufwunsch' && name === 'Verpasster Anruf') return true;
+  return /gespr(ä|ae)ch\s+abgebrochen/i.test(name + ' ' + text)
+    && /keine\s+verwertbaren\s+angaben/i.test(text);
+}
+function kurzQuelle(obj) {
+  return obj.quelle === 'SMS-Rückrufwunsch' ? 'Rückruf-Link per SMS bestätigt' : 'Anruf ohne verwertbare Angaben';
+}
+
 function getSheets() {
   const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT || '{}');
   const auth = new google.auth.GoogleAuth({
@@ -344,9 +365,42 @@ exports.handler = async (event) => {
   // erneut), wird NICHT ueberschrieben – sonst gingen Bearbeitungen verloren.
   if (dbAktiv()) {
     try {
-      const vorhanden = await sql().query('SELECT 1 FROM anfragen WHERE id = $1', [obj.id]);
+      // Doppelt geschickte Mail: entweder als eigene Karte oder schon als
+      // "Weiterer Anruf" (ref = Mail-id) an einer anderen Karte vorhanden.
+      const vorhanden = await sql().query(
+        `SELECT id FROM anfragen WHERE id = $1 OR history @> jsonb_build_array(jsonb_build_object('ref', $1::text)) LIMIT 1`,
+        [obj.id]
+      );
       if (vorhanden.length) {
-        return jsonResponse(200, { success: true, message: 'Bereits vorhanden', id: obj.id, telefon: obj.telefon, duplikat: true });
+        return jsonResponse(200, { success: true, message: 'Bereits vorhanden', id: vorhanden[0].id, telefon: obj.telefon, duplikat: true });
+      }
+
+      // Anruf ohne Angaben + offene Karte derselben Nummer -> dort anhaengen
+      if (obj.telefon && istAnrufOhneAngaben(obj)) {
+        const offene = await sql().query(
+          `SELECT id, telefon FROM anfragen
+            WHERE status NOT IN ('Erledigt', 'Weitergeleitet') AND telefon <> '' AND quelle <> 'Interne Nachricht'
+            ORDER BY reihenfolge DESC`
+        );
+        const treffer = offene.find((z) => normalizeTelefon(z.telefon) === obj.telefon);
+        if (treffer) {
+          const eintrag = {
+            zeitstempel: new Date().toISOString(),
+            aktion: AKTION_WEITERER_ANRUF,
+            von: 'System',
+            details: kurzQuelle(obj) + (obj.standort ? ' (' + (obj.standort === 'bad-schwartau' ? 'Bad Schwartau' : 'Stockelsdorf') + ')' : ''),
+            ref: obj.id,
+          };
+          await sql().query(
+            `UPDATE anfragen
+                SET history = history || jsonb_build_array($2::jsonb),
+                    prioritaet = 'Sofort',
+                    geaendert_am = now()
+              WHERE id = $1`,
+            [treffer.id, JSON.stringify(eintrag)]
+          );
+          return jsonResponse(200, { success: true, message: 'Weiterer Anruf an bestehende Karte angehängt', id: treffer.id, telefon: obj.telefon, zusammengefuehrt: true });
+        }
       }
       await anfragenSpeichern([{ ...obj, history: JSON.parse(historyStr), klaerung: null }], { historyErsetzen: true });
       return jsonResponse(200, { success: true, message: 'Anfrage angelegt', id: obj.id, telefon: obj.telefon });

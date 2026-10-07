@@ -5,10 +5,11 @@ import {
   PhoneCall, Pin, ArrowRight, ArrowLeft, Send, Inbox, UserCheck,
   Search, FileText, PhoneOff, CalendarCheck, Hourglass, RotateCcw,
   CheckCircle2, Frown, CalendarX, Megaphone, Archive, MapPin,
-  MessageSquare, HelpCircle, CornerUpLeft,
+  MessageSquare, HelpCircle, CornerUpLeft, MessagesSquare, Users,
 } from 'lucide-react';
 import OsteoTermine from './OsteoTermine';
 import './rueckfrage.css';
+import './nachricht.css';
 
 // ====================================================================
 // Konfiguration
@@ -58,13 +59,17 @@ const WEITERLEITUNG_URL = BACKEND_BASE + '/.netlify/functions/weiterleitung-send
 // netlify/functions/klaerung-update.js). Wichtig, weil bei Rückfragen bewusst
 // zwei Standorte gleichzeitig am selben Board arbeiten.
 const KLAERUNG_URL = BACKEND_BASE + '/.netlify/functions/klaerung-update';
+// Interne Nachrichten zwischen Mitarbeiter:innen (an Person oder Standort).
+// Jede Nachricht ist eine eigene Karte; Verlauf/Lesestand schreibt nur diese Function.
+const NACHRICHT_URL = BACKEND_BASE + '/.netlify/functions/nachricht-api';
 
 const SPALTEN = ['Offen', 'In Bearbeitung', 'To Do'];
 const ALLE_STATUS = ['Offen', 'In Bearbeitung', 'To Do', 'Erledigt', 'Weitergeleitet'];
 const PRIORITAETEN = ['Sofort', 'Normal', 'Niedrig'];
-const BEARBEITER = ['Finn', 'Annika', 'Petra Drewitz', 'Vera Köhn', 'Antje Dreyer', 'Katy', 'Laura Klemme', 'Unzugewiesen'];
+const BEARBEITER = ['Finn', 'Annika', 'Petra Drewitz', 'Vera Köhn', 'Antje Dreyer', 'Katy', 'Laura Klemme', 'Hanna Wrobel', 'Oliver Wrobel', 'Unzugewiesen'];
 const QUELLEN = ['Website', 'Telefon-Benachrichtigung', 'Manuell erfasst'];
-const READ_ONLY_USERS = ['Oliver Wrobel'];
+// Seit 07.10.2026 leer: Hanna und Oliver haben volle Rechte (siehe auth.cjs NUR_LESEN_IDS)
+const READ_ONLY_USERS = [];
 
 // Bearbeitungs-Schritte, getrennt nach aktiv (In Bearbeitung) / haengt (To Do)
 const SCHRITTE_AKTIV = ['Rückruf vereinbart', 'Prüfe Terminverfügbarkeit', 'Termin wird abgestimmt'];
@@ -238,6 +243,21 @@ function followupFaellig(a) {
   return new Date(ziel) < new Date() && a.status !== 'Erledigt';
 }
 const istHeute = (d) => d === heute();
+
+// ---- Wiederholte Anrufe (anfrage-create hängt Anrufe ohne Angaben an die
+// offene Karte derselben Nummer an: History-Eintrag „Weiterer Anruf") ----
+const ANRUF_QUELLEN = ['Telefon-Benachrichtigung', 'SMS-Rückrufwunsch'];
+const AKTION_WEITERER_ANRUF = 'Weiterer Anruf';
+function weitereAnrufe(a) {
+  return (Array.isArray(a && a.history) ? a.history : []).filter((e) => e && e.aktion === AKTION_WEITERER_ANRUF);
+}
+// Anzahl Anrufe, die in dieser Karte stecken (die Karte selbst zählt mit, wenn sie aus einem Anruf entstand)
+function anrufAnzahl(a) {
+  return (ANRUF_QUELLEN.includes(a && a.quelle) ? 1 : 0) + weitereAnrufe(a).length;
+}
+// Wer mehrfach anruft, ist dringend – auch wenn die Priorität beim
+// Speichern einer alten Kartenversion wieder überschrieben wurde.
+const prioEffektiv = (a) => (weitereAnrufe(a).length ? 'Sofort' : a.prioritaet);
 
 // Telefonnummer auf E.164 (+49...) normalisieren — fuer sauberen SMS-Versand
 function normalizeTelefon(roh) {
@@ -444,6 +464,62 @@ function wartedauerLabel(min) {
   return 'seit ' + tage + ' Tag' + (tage === 1 ? '' : 'en');
 }
 
+// ---- Interne Nachrichten (Spalte `nachricht`) ----
+// Datenform: { von:{id,name}, an:{typ:'person',id,name} | {typ:'standort',standort,name},
+//              verlauf:[{zeit,autorId,autor,text}], gelesen:{ <personId>: iso } }
+// Die Karte selbst ist eine normale Board-Karte (Quelle „Interne Nachricht"),
+// zählt aber nicht als Patientenanfrage (Zähler, Ergebnis-Popup).
+const QUELLE_NACHRICHT = 'Interne Nachricht';
+const ERGEBNIS_NACHRICHT = 'Interne Nachricht';
+function nachrichtVon(a) {
+  const n = a && a.nachricht;
+  if (!n || typeof n !== 'object' || !n.von || !n.an) return null;
+  return {
+    von: { id: String(n.von.id || ''), name: n.von.name || '—' },
+    an: n.an,
+    verlauf: Array.isArray(n.verlauf) ? n.verlauf : [],
+    gelesen: n.gelesen && typeof n.gelesen === 'object' ? n.gelesen : {},
+  };
+}
+const istNachricht = (a) => !!a && (a.quelle === QUELLE_NACHRICHT || !!nachrichtVon(a));
+const nachrichtAnName = (n) => (n.an.typ === 'standort' ? standortName(n.an.standort) : (n.an.name || '—'));
+// Betrifft die Nachricht diese Person direkt? (Empfänger:in, Absender:in oder hat geantwortet)
+function nachrichtBetrifft(a, meId) {
+  const n = nachrichtVon(a);
+  if (!n || !meId) return false;
+  if (n.von.id === meId) return true;
+  if (n.an.typ === 'person' && String(n.an.id) === meId) return true;
+  return n.verlauf.some((e) => String(e.autorId || '') === meId);
+}
+// Ungelesen = der letzte Beitrag stammt von jemand anderem und ist neuer als der eigene Lesestand
+function nachrichtUngelesen(a, meId) {
+  const n = nachrichtVon(a);
+  if (!n || !meId || !n.verlauf.length) return false;
+  const letzter = n.verlauf[n.verlauf.length - 1];
+  if (String(letzter.autorId || '') === meId) return false;
+  const gelesen = n.gelesen[meId];
+  return !gelesen || String(gelesen) < String(letzter.zeit || '');
+}
+const nachrichtFuerMich = (a, meId) => nachrichtBetrifft(a, meId) && nachrichtUngelesen(a, meId);
+// Schlüssel für „weggeklickt": Karte + Zeitpunkt des letzten Beitrags. Kommt ein
+// neuer Beitrag, ändert sich der Schlüssel und das Hinweisfenster erscheint erneut.
+function nachrichtPopupSchluessel(a) {
+  const n = nachrichtVon(a);
+  const letzter = n && n.verlauf.length ? n.verlauf[n.verlauf.length - 1] : null;
+  return String(a.id) + '|' + (letzter ? letzter.zeit : '');
+}
+// Gehört diese Nachricht ins Hinweisfenster?
+//  - alles, was die Person direkt betrifft und ungelesen ist (an mich, Antwort auf meine)
+//  - neue Standort-Nachrichten (noch ohne Antwort) an den Standort dieses Rechners;
+//    ist am Rechner noch kein Standort gemerkt, an beiden Standorten
+function nachrichtFuerPopup(a, meId, meinStandort) {
+  const n = nachrichtVon(a);
+  if (!n || !meId) return false;
+  if (nachrichtFuerMich(a, meId)) return true;
+  return n.an.typ === 'standort' && n.von.id !== meId && n.verlauf.length === 1
+    && nachrichtUngelesen(a, meId) && (!meinStandort || n.an.standort === meinStandort);
+}
+
 // Server-Stand merken / Änderungen ermitteln (für kartenweises Speichern)
 function standMerken(liste) {
   const m = new Map();
@@ -479,6 +555,23 @@ function Dashboard() {
   const [selectedAnfrage, setSelectedAnfrage] = useState(null);
   const [weiterleitenAnfrage, setWeiterleitenAnfrage] = useState(null);
   const [klaerungAnfrage, setKlaerungAnfrage] = useState(null); // Karte, für die das Rückfrage-Modal offen ist
+  const [nachrichtAnfrage, setNachrichtAnfrage] = useState(null); // interne Nachricht, deren Verlauf offen ist
+  const [nachrichtNeu, setNachrichtNeu] = useState(false);
+  const [personen, setPersonen] = useState([]); // mögliche Empfänger:innen (wie Anmeldeliste)
+  // Weggeklickte Hinweisfenster (pro Tab/Anmeldung). Bewusst sessionStorage:
+  // nach neuer Anmeldung erscheinen ungelesene Nachrichten wieder.
+  const popupSpeicher = 'pp_nm_weg_' + String((leseUser() || {}).id || '');
+  const [weggeklickt, setWeggeklickt] = useState(() => {
+    try { return new Set(JSON.parse(sessionStorage.getItem(popupSpeicher) || '[]')); } catch { return new Set(); }
+  });
+  const popupWegklicken = (liste) => {
+    setWeggeklickt((alt) => {
+      const neu = new Set(alt);
+      liste.forEach((a) => neu.add(nachrichtPopupSchluessel(a)));
+      try { sessionStorage.setItem(popupSpeicher, JSON.stringify([...neu].slice(-300))); } catch {}
+      return neu;
+    });
+  };
   const [ergebnisAnfrage, setErgebnisAnfrage] = useState(null);
   const [mailtoAnfrage, setMailtoAnfrage] = useState(null); // { anfrage, ergebnis } für E-Mail-Modal
   const [draftOhneErgebnisAnfrage, setDraftOhneErgebnisAnfrage] = useState(null); // Anfrage, für die "Entwurf erstellen" (ohne Ergebnis) offen ist
@@ -488,6 +581,7 @@ function Dashboard() {
   const [suchbegriff, setSuchbegriff] = useState('');
 
   const isReadOnly = !!angemeldet.lesend || READ_ONLY_USERS.includes(currentUser);
+  const meId = String(angemeldet.id || '');
 
   // Race-Condition-Schutz: Solange ein Speichervorgang (saveToSheets) noch läuft,
   // überschreibt ein zeitgleicher Auto-Refresh (loadFromSheets) NICHT den lokalen
@@ -504,6 +598,18 @@ function Dashboard() {
   const serverStand = useRef(new Map());
 
   useEffect(() => { loadFromSheets(); loadNotes(); /* eslint-disable-next-line */ }, []);
+  // Empfängerliste für interne Nachrichten = dieselben Personen wie bei der Anmeldung
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(LOGIN_URL, { method: 'GET' });
+        const json = await res.json().catch(() => ({}));
+        if (json && json.success && Array.isArray(json.personen)) {
+          setPersonen(json.personen.map((p) => ({ id: String(p.id), name: p.name })));
+        }
+      } catch { /* optional – ohne Liste nur Standort-Nachrichten */ }
+    })();
+  }, []);
   useEffect(() => {
     const t = setInterval(() => { loadFromSheets(); loadNotes(); }, 60000);
     return () => clearInterval(t); /* eslint-disable-next-line */
@@ -617,6 +723,10 @@ function Dashboard() {
 
   // Karten-Aktionen (Workflow-Buttons)
   const cardMove = (anfrage, neuerStatus) => {
+    if (neuerStatus === 'Erledigt' && istNachricht(anfrage)) {
+      // Interne Nachricht: kein Ergebnis-Popup, keine Terminbestätigung
+      cardErledigt(anfrage, ERGEBNIS_NACHRICHT); return;
+    }
     if (neuerStatus === 'Erledigt') {
       // Ergebnis bereits gesetzt (z.B. Ausfallrechnung-Fall): direkt abschließen, kein Popup.
       if (anfrage.ergebnis) { cardErledigt(anfrage, anfrage.ergebnis); return; }
@@ -813,6 +923,58 @@ function Dashboard() {
     sendeKlaerung(anfrage, neueKlaerung, histEintrag);
   };
 
+  // ------------------------------------------------------------------
+  // Interne Nachrichten
+  // ------------------------------------------------------------------
+  // Wie die Rückfrage feldgranular über eine eigene Function, nie über
+  // persist(): Verlauf und Lesestand schreibt ausschließlich nachricht-api.
+  const nachrichtAufruf = async (body) => {
+    const res = await apiFetch(NACHRICHT_URL, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) throw new Error((data && data.error) || ('HTTP ' + res.status));
+    return data;
+  };
+  // Lokale Änderung an `nachricht` als Server-Stand merken, damit die Karte
+  // beim nächsten Speichern nicht als „geändert" mitgeschickt wird.
+  const nachrichtLokal = (id, aendern) => {
+    setAnfragen((prev) => prev.map((a) => {
+      if (a.id !== id) return a;
+      const neu = aendern(a);
+      if (serverStand.current.get(String(id)) === JSON.stringify(a)) serverStand.current.set(String(id), JSON.stringify(neu));
+      return neu;
+    }));
+  };
+  const nachrichtSenden = async (daten) => {
+    await nachrichtAufruf({ aktion: 'senden', ...daten });
+    setNachrichtNeu(false);
+    setLetzteAenderung(new Date());
+    loadFromSheets();
+  };
+  const nachrichtAntworten = async (anfrage, text) => {
+    await nachrichtAufruf({ aktion: 'antwort', id: anfrage.id, text });
+    const eintrag = { zeit: jetztISO(), autorId: meId, autor: currentUser, text: text.trim() };
+    nachrichtLokal(anfrage.id, (a) => {
+      const n = nachrichtVon(a);
+      if (!n) return a;
+      return { ...a, nachricht: { ...a.nachricht, verlauf: [...n.verlauf, eintrag], gelesen: { ...n.gelesen, [meId]: eintrag.zeit } } };
+    });
+    setLetzteAenderung(new Date());
+    loadFromSheets();
+  };
+  const nachrichtGelesen = (anfrage) => {
+    if (!nachrichtUngelesen(anfrage, meId)) return;
+    const zeit = jetztISO();
+    nachrichtLokal(anfrage.id, (a) => {
+      const n = nachrichtVon(a);
+      return n ? { ...a, nachricht: { ...a.nachricht, gelesen: { ...n.gelesen, [meId]: zeit } } } : a;
+    });
+    nachrichtAufruf({ aktion: 'gelesen', id: anfrage.id }).catch(() => { /* nur Komfort */ });
+  };
+  // Klick auf eine Karte: Nachrichten öffnen ihren Verlauf, alles andere das Detail-Modal
+  const karteOeffnen = (a) => { if (istNachricht(a)) setNachrichtAnfrage(a); else setSelectedAnfrage(a); };
+
   const deleteAnfrage = (anfrage) => {
     if (!window.confirm('Anfrage von '+anfrage.name+' wirklich loeschen?')) return;
     persist(anfragen.filter((a) => a.id!==anfrage.id)); setSelectedAnfrage(null);
@@ -829,8 +991,8 @@ function Dashboard() {
     .filter((a) => !['Erledigt','Weitergeleitet'].includes(a.status))
     .map((a, i) => [a, i])
     .sort(([a, ia], [b, ib]) => {
-      const ra = PRIO_RANG[a.prioritaet] ?? 1;
-      const rb = PRIO_RANG[b.prioritaet] ?? 1;
+      const ra = PRIO_RANG[prioEffektiv(a)] ?? 1;
+      const rb = PRIO_RANG[prioEffektiv(b)] ?? 1;
       return ra !== rb ? ra - rb : ia - ib;
     })
     .map(([a]) => a);
@@ -848,10 +1010,37 @@ function Dashboard() {
       history:[...(a.history||[]), historyEintrag('Status', currentUser, 'Erledigt → Offen (aus Mülleimer)')]
     } : a));
   };
-  const offeneCount = sichtbar.filter((a) => a.status==='Offen').length;
-  const sofortCount = sichtbar.filter((a) => a.prioritaet==='Sofort').length;
-  const erledigtHeute = useMemo(() => anfragen.filter((a) => a.status==='Erledigt' && istHeute(a.eingangsdatum)).length, [anfragen]);
-  const weitergeleitetHeute = useMemo(() => anfragen.filter((a) => a.status==='Weitergeleitet' && istHeute(a.eingangsdatum)).length, [anfragen]);
+  // Interne Nachrichten zählen nicht als Patientenanfragen
+  const offeneCount = sichtbar.filter((a) => a.status==='Offen' && !istNachricht(a)).length;
+  const sofortCount = sichtbar.filter((a) => prioEffektiv(a)==='Sofort' && !istNachricht(a)).length;
+  // Wie oft hat eine Nummer heute angerufen (über alle Karten, auch erledigte)?
+  // Für den Hinweis „Nummer hat heute schon X× angerufen" auf Karten mit Inhalt.
+  const anrufeHeute = useMemo(() => {
+    const m = new Map();
+    anfragen.forEach((a) => {
+      const tel = normalizeTelefon(a.telefon);
+      if (!tel || !istHeute(a.eingangsdatum)) return;
+      const n = anrufAnzahl(a);
+      if (n) m.set(tel, (m.get(tel) || 0) + n);
+    });
+    return m;
+  }, [anfragen]);
+  const andereAnrufeHeute = (a) => {
+    const tel = normalizeTelefon(a.telefon);
+    if (!tel) return 0;
+    return Math.max(0, (anrufeHeute.get(tel) || 0) - (istHeute(a.eingangsdatum) ? anrufAnzahl(a) : 0));
+  };
+  const erledigtHeute = useMemo(() => anfragen.filter((a) => a.status==='Erledigt' && !istNachricht(a) && istHeute(a.eingangsdatum)).length, [anfragen]);
+  const weitergeleitetHeute = useMemo(() => anfragen.filter((a) => a.status==='Weitergeleitet' && !istNachricht(a) && istHeute(a.eingangsdatum)).length, [anfragen]);
+  // Nachrichten mit ungelesenem Beitrag für die angemeldete Person (auch erledigte
+  // nicht, die tauchen erst durch eine neue Antwort wieder auf)
+  const fuerMich = sichtbar.filter((a) => nachrichtFuerMich(a, meId));
+  // Hinweisfenster: neue Nachrichten, die hier noch nicht weggeklickt wurden
+  let meinStandort = '';
+  try { meinStandort = normStandort(localStorage.getItem('standortDefault')); } catch {}
+  const popupNachrichten = sichtbar
+    .filter((a) => nachrichtFuerPopup(a, meId, meinStandort))
+    .filter((a) => !weggeklickt.has(nachrichtPopupSchluessel(a)));
   // Offene/beantwortete Standort-Rückfragen (nur auf noch aktiven Karten).
   // Bewusst NICHT von der Suche gefiltert: die Leiste soll immer den
   // Gesamtstand zeigen, damit keine Rückfrage übersehen wird.
@@ -867,6 +1056,9 @@ function Dashboard() {
   const klaerungLive = klaerungAnfrage
     ? (anfragen.find((a) => a.id === klaerungAnfrage.id) || klaerungAnfrage)
     : null;
+  const nachrichtLive = nachrichtAnfrage
+    ? (anfragen.find((a) => a.id === nachrichtAnfrage.id) || nachrichtAnfrage)
+    : null;
 
   return (
     <div className="app-shell">
@@ -875,6 +1067,8 @@ function Dashboard() {
           offeneCount={offeneCount} sofortCount={sofortCount}
           erledigtHeute={erledigtHeute} weitergeleitetHeute={weitergeleitetHeute}
           rueckfragenCount={rueckfragen.length}
+          fuerMichCount={fuerMich.length}
+          onNachricht={() => setNachrichtNeu(true)}
           letzteAenderung={letzteAenderung} currentUser={currentUser}
           isReadOnly={isReadOnly}
           suchbegriff={suchbegriff} setSuchbegriff={setSuchbegriff}
@@ -901,22 +1095,23 @@ function Dashboard() {
             <div className="lade-zustand"><div className="spinner" /><span>Daten laden…</span></div>
           ) : ansicht==='aktiv' ? (
             <>
+              <NachrichtenLeiste anfragen={fuerMich} onOeffnen={setNachrichtAnfrage} />
               <RueckfragenLeiste anfragen={rueckfragen} onOeffnen={setKlaerungAnfrage} />
               <div className="spalten-grid spalten-grid-4">
                 <StatusSpalte key="Offen-bs" status="Offen" standort={STANDORT_BS}
                   anfragen={sichtbarGefiltert.filter((a) => a.status==='Offen' && standortVon(a)===STANDORT_BS)}
-                  isReadOnly={isReadOnly} currentUser={currentUser} onCardClick={setSelectedAnfrage}
+                  isReadOnly={isReadOnly} currentUser={currentUser} meId={meId} andereAnrufeHeute={andereAnrufeHeute} onCardClick={karteOeffnen}
                   onMove={cardMove} onSetSchritt={cardSetSchritt} onWeiterleiten={setWeiterleitenAnfrage}
                   onKlaerung={setKlaerungAnfrage} />
                 <StatusSpalte key="Offen-sto" status="Offen" standort={STANDORT_STO}
                   anfragen={sichtbarGefiltert.filter((a) => a.status==='Offen' && standortVon(a)===STANDORT_STO)}
-                  isReadOnly={isReadOnly} currentUser={currentUser} onCardClick={setSelectedAnfrage}
+                  isReadOnly={isReadOnly} currentUser={currentUser} meId={meId} andereAnrufeHeute={andereAnrufeHeute} onCardClick={karteOeffnen}
                   onMove={cardMove} onSetSchritt={cardSetSchritt} onWeiterleiten={setWeiterleitenAnfrage}
                   onKlaerung={setKlaerungAnfrage} />
                 {SPALTEN.filter((status) => status !== 'Offen').map((status) => (
                   <StatusSpalte key={status} status={status}
                     anfragen={sichtbarGefiltert.filter((a) => a.status===status)}
-                    isReadOnly={isReadOnly} currentUser={currentUser} onCardClick={setSelectedAnfrage}
+                    isReadOnly={isReadOnly} currentUser={currentUser} meId={meId} andereAnrufeHeute={andereAnrufeHeute} onCardClick={karteOeffnen}
                     onMove={cardMove} onSetSchritt={cardSetSchritt} onWeiterleiten={setWeiterleitenAnfrage}
                     onKlaerung={setKlaerungAnfrage} />
                 ))}
@@ -924,7 +1119,7 @@ function Dashboard() {
             </>
           ) : (
             <Muelleimer anfragen={muelleimerGefiltert} isReadOnly={isReadOnly}
-              onCardClick={setSelectedAnfrage} onZurueckholen={zurueckholen} />
+              onCardClick={karteOeffnen} onZurueckholen={zurueckholen} />
           )}
           <UebergabeNotizen notizen={notizen} isReadOnly={isReadOnly} onAdd={addNotiz} onDelete={deleteNotiz} />
         </main>
@@ -945,6 +1140,22 @@ function Dashboard() {
             onClose={() => setKlaerungAnfrage(null)}
             onSenden={(text, opt) => klaerungSenden(klaerungLive, text, opt)}
             onSchliessen={() => klaerungSchliessen(klaerungLive)} />
+        )}
+        {nachrichtLive && (
+          <NachrichtModal anfrage={nachrichtLive} meId={meId} isReadOnly={isReadOnly}
+            onOeffnet={nachrichtGelesen}
+            onClose={() => setNachrichtAnfrage(null)}
+            onAntworten={(text) => nachrichtAntworten(nachrichtLive, text)}
+            onErledigt={() => { cardMove(nachrichtLive, 'Erledigt'); setNachrichtAnfrage(null); }} />
+        )}
+        {popupNachrichten.length > 0 && !nachrichtLive && (
+          <NachrichtPopup anfragen={popupNachrichten} meId={meId}
+            onOeffnen={(a) => { popupWegklicken([a]); setNachrichtAnfrage(a); }}
+            onWeg={() => popupWegklicken(popupNachrichten)} />
+        )}
+        {nachrichtNeu && !isReadOnly && (
+          <NachrichtNeuModal personen={personen.filter((p) => p.id !== meId)}
+            onClose={() => setNachrichtNeu(false)} onSenden={nachrichtSenden} />
         )}
         {ergebnisAnfrage && (
           <ErgebnisModal anfrage={ergebnisAnfrage} onClose={() => setErgebnisAnfrage(null)} onConfirm={cardErledigt} />
@@ -973,7 +1184,7 @@ function Dashboard() {
 // ====================================================================
 // Kopfzeile
 // ====================================================================
-function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeute, rueckfragenCount, letzteAenderung, currentUser, isReadOnly, suchbegriff, setSuchbegriff, onNeu, onRefresh }) {
+function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeute, rueckfragenCount, fuerMichCount, onNachricht, letzteAenderung, currentUser, isReadOnly, suchbegriff, setSuchbegriff, onNeu, onRefresh }) {
   const aenderungsZeit = letzteAenderung ? letzteAenderung.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}) : '—';
   return (
     <div className="kopfzeile">
@@ -992,6 +1203,9 @@ function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeut
           {rueckfragenCount > 0 && (
             <div className="chip rf-zeile-chip"><MessageSquare size={13} /><span>{rueckfragenCount} Rückfrage{rueckfragenCount===1?'':'n'}</span></div>
           )}
+          {fuerMichCount > 0 && (
+            <div className="chip nm-chip"><Mail size={13} /><span>{fuerMichCount} für mich</span></div>
+          )}
         </div>
       </div>
       <div className="kopf-suche">
@@ -1008,6 +1222,7 @@ function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeut
           <User size={13} /> {currentUser}{isReadOnly ? ' · nur lesen' : ''}
         </span>
         <button type="button" className="user-select" onClick={abmelden} title="Abmelden / Person wechseln">Abmelden</button>
+        {!isReadOnly && <button className="nm-neu-btn" onClick={onNachricht}><MessagesSquare size={14} /> Nachricht</button>}
         {!isReadOnly && <button className="neu-btn" onClick={onNeu}><Plus size={14} /> Neue Anfrage</button>}
       </div>
     </div>
@@ -1017,7 +1232,7 @@ function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeut
 // ====================================================================
 // StatusSpalte (Box mit farbigem Kopf)
 // ====================================================================
-function StatusSpalte({ status, standort, anfragen, isReadOnly, currentUser, onCardClick, onMove, onSetSchritt, onWeiterleiten, onKlaerung }) {
+function StatusSpalte({ status, standort, anfragen, isReadOnly, currentUser, meId, andereAnrufeHeute, onCardClick, onMove, onSetSchritt, onWeiterleiten, onKlaerung }) {
   const meta = SPALTEN_META[status];
   const istTodoSpalte = status === 'To Do';
   const [todoTab, setTodoTab] = useState(() => localStorage.getItem('todoSpalteTab') || 'todo');
@@ -1061,9 +1276,15 @@ function StatusSpalte({ status, standort, anfragen, isReadOnly, currentUser, onC
       ) : (
         <div className="spalte-karten">
           {anfragen.map((a) => (
-            <AnfragenKarte key={a.id} anfrage={a} spalte={status} isReadOnly={isReadOnly}
-              onClick={() => onCardClick(a)} onMove={onMove} onSetSchritt={onSetSchritt}
-              onWeiterleiten={onWeiterleiten} onKlaerung={onKlaerung} />
+            istNachricht(a) ? (
+              <NachrichtKarte key={a.id} anfrage={a} spalte={status} isReadOnly={isReadOnly} meId={meId}
+                onClick={() => onCardClick(a)} onMove={onMove} />
+            ) : (
+              <AnfragenKarte key={a.id} anfrage={a} spalte={status} isReadOnly={isReadOnly}
+                andereAnrufe={andereAnrufeHeute ? andereAnrufeHeute(a) : 0}
+                onClick={() => onCardClick(a)} onMove={onMove} onSetSchritt={onSetSchritt}
+                onWeiterleiten={onWeiterleiten} onKlaerung={onKlaerung} />
+            )
           ))}
           {anfragen.length===0 && <p className="spalte-leer">Keine Einträge</p>}
         </div>
@@ -1075,9 +1296,14 @@ function StatusSpalte({ status, standort, anfragen, isReadOnly, currentUser, onC
 // ====================================================================
 // AnfragenKarte (mit Workflow-Buttons + Schritt-Etikett)
 // ====================================================================
-function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchritt, onWeiterleiten, onKlaerung }) {
+function AnfragenKarte({ anfrage, spalte, isReadOnly, andereAnrufe = 0, onClick, onMove, onSetSchritt, onWeiterleiten, onKlaerung }) {
   const [schrittOffen, setSchrittOffen] = useState(false);
-  const prio = PRIO_STYLE[anfrage.prioritaet] || PRIO_STYLE.Normal;
+  const prioWert = prioEffektiv(anfrage);
+  const prio = PRIO_STYLE[prioWert] || PRIO_STYLE.Normal;
+  // Mehrfach-Anrufe: weitere Anrufe ohne Angaben, die auf dieser Karte gelandet sind
+  const weitere = weitereAnrufe(anfrage);
+  const anrufe = anrufAnzahl(anfrage);
+  const letzterAnruf = weitere.length ? weitere[weitere.length - 1] : null;
   const istTodo = spalte==='To Do';
   const istBearb = spalte==='In Bearbeitung';
   const faellig = followupFaellig(anfrage);
@@ -1087,7 +1313,7 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
   // Anker nicht von heute ist) — eine seit gestern offene Sofort-Karte ist
   // erst recht überfällig.
   const sofortAnker = fristAnkerTS(anfrage);
-  const sofortUeberfaellig = anfrage.prioritaet === 'Sofort'
+  const sofortUeberfaellig = prioWert === 'Sofort'
     && !['Erledigt','Weitergeleitet','To Do'].includes(anfrage.status)
     && !!sofortAnker
     && (Date.now() - sofortAnker.getTime()) >= 60 * 60 * 1000;
@@ -1119,8 +1345,20 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
       <div className="karte-kopf">
         <span className="karte-name">{anfrage.name}</span>
         {istTodo ? <AlertTriangle size={12} color="#b8742a" />
-          : <span className="karte-prio" style={{ color:prio.text, background:prio.bg }}>{anfrage.prioritaet}</span>}
+          : <span className="karte-prio" style={{ color:prio.text, background:prio.bg }}>{prioWert}</span>}
       </div>
+      {weitere.length > 0 && (
+        <div className="karte-mehrfach" title={'Anrufe: ' + weitere.map((e) => datumUhrzeit(e.zeitstempel)).join(', ')}>
+          <PhoneCall size={12} />
+          <span><strong>{anrufe}× angerufen</strong>{letzterAnruf ? ' · zuletzt ' + (istHeute(String(letzterAnruf.zeitstempel || '').slice(0, 10)) ? uhrzeit(letzterAnruf.zeitstempel) : datumUhrzeit(letzterAnruf.zeitstempel)) : ''}</span>
+        </div>
+      )}
+      {andereAnrufe > 0 && (
+        <div className="karte-mehrfach karte-mehrfach-hinweis">
+          <PhoneCall size={11} />
+          <span>Nummer hat heute schon {andereAnrufe}× angerufen</span>
+        </div>
+      )}
       <p className="karte-anliegen">{bereinigeAnliegen(anfrage.anliegen)}</p>
 
       {rfOffen && (
@@ -1216,6 +1454,300 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ====================================================================
+// Interne Nachricht als Karte
+// ====================================================================
+function NachrichtKarte({ anfrage, spalte, isReadOnly, meId, onClick, onMove }) {
+  const n = nachrichtVon(anfrage);
+  const letzter = n && n.verlauf.length ? n.verlauf[n.verlauf.length - 1] : null;
+  const neu = nachrichtUngelesen(anfrage, meId) && (nachrichtBetrifft(anfrage, meId) || (n && n.an.typ === 'standort'));
+  const anMich = !!n && n.an.typ === 'person' && String(n.an.id) === meId;
+  const stop = (e, fn) => { e.stopPropagation(); fn(); };
+  return (
+    <div className={'karte karte-nachricht' + (neu ? ' nm-ungelesen' : '')} onClick={onClick}>
+      <div className="karte-standort">
+        <MapPin size={11} /> {standortName(standortVon(anfrage))}
+      </div>
+      <div className="nm-etikett">
+        <MessagesSquare size={11} /> Interne Nachricht{neu && <span className="nm-neu-punkt">neu</span>}
+      </div>
+      <div className="karte-kopf">
+        <span className="karte-name">{anfrage.name || '(ohne Betreff)'}</span>
+        {anfrage.prioritaet === 'Sofort' && <span className="karte-prio" style={{ color: PRIO_STYLE.Sofort.text, background: PRIO_STYLE.Sofort.bg }}>Dringend</span>}
+      </div>
+      {n && (
+        <div className="nm-richtung">
+          {n.von.name} <ArrowRight size={10} /> {n.an.typ === 'standort' ? <><Users size={10} /> {nachrichtAnName(n)}</> : <>{anMich ? 'mich' : nachrichtAnName(n)}</>}
+        </div>
+      )}
+      <p className="karte-anliegen">{letzter ? letzter.text : anfrage.anliegen}</p>
+      {n && n.verlauf.length > 1 && (
+        <div className="nm-zaehler"><MessageSquare size={11} /> {n.verlauf.length - 1} Antwort{n.verlauf.length === 2 ? '' : 'en'} · zuletzt {letzter.autor || '—'}</div>
+      )}
+      <div className="karte-meta">
+        <span className="karte-zeit"><Clock size={12} /> {letzter ? datumUhrzeit(letzter.zeit) : eingangLabel(anfrage)}</span>
+      </div>
+      {!isReadOnly && (
+        <div className="karte-aktionen" onClick={(e) => e.stopPropagation()}>
+          {spalte === 'Offen' && (
+            <button className="akt-haupt" onClick={(e) => stop(e, () => onMove(anfrage, 'In Bearbeitung'))}>Übernehmen <ArrowRight size={12} /></button>
+          )}
+          {spalte !== 'Offen' && (
+            <button className="akt-grau" title="Zurück" onClick={(e) => stop(e, () => onMove(anfrage, spalte === 'To Do' ? 'In Bearbeitung' : 'Offen'))}><ArrowLeft size={12} /></button>
+          )}
+          <button className="akt-nm" title="Antworten" onClick={(e) => stop(e, onClick)}><CornerUpLeft size={12} /></button>
+          <button className="akt-fertig" title="Erledigt" onClick={(e) => stop(e, () => onMove(anfrage, 'Erledigt'))}><Check size={12} /></button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Leiste über dem Board: Nachrichten mit neuem Beitrag für die angemeldete Person
+function NachrichtenLeiste({ anfragen, onOeffnen }) {
+  if (!anfragen.length) return null;
+  return (
+    <div className="nm-leiste">
+      <div className="nm-leiste-kopf"><Mail size={13} /> Neue Nachrichten für Sie ({anfragen.length})</div>
+      <div className="rf-leiste-liste">
+        {anfragen.map((a) => {
+          const n = nachrichtVon(a);
+          if (!n) return null;
+          const letzter = n.verlauf[n.verlauf.length - 1];
+          return (
+            <button key={a.id} type="button" className="rf-zeile nm-zeile" onClick={() => onOeffnen(a)}>
+              <span className="rf-zeile-name">{a.name || '(ohne Betreff)'}</span>
+              <span className="nm-zeile-von">von {letzter ? letzter.autor : n.von.name}</span>
+              <span className="rf-zeile-text">{letzter ? letzter.text : ''}</span>
+              <span className="nm-zeile-chip">{letzter ? uhrzeit(letzter.zeit) : ''}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Hinweisfenster vorne im Bildschirm: „Sie haben 1 neue Nachricht".
+// Schließt sich nicht durch Klick daneben – nur über „Öffnen" oder „Später ansehen".
+function NachrichtPopup({ anfragen, meId, onOeffnen, onWeg }) {
+  const anzahl = anfragen.length;
+  return (
+    <div className="nm-popup-overlay" role="alertdialog" aria-modal="true" aria-labelledby="nm-popup-titel">
+      <div className="modal modal-schmal nm-popup">
+        <div className="modal-kopf modal-kopf-nm">
+          <h2 id="nm-popup-titel"><Mail size={18} /> Sie haben {anzahl === 1 ? '1 neue Nachricht' : anzahl + ' neue Nachrichten'}</h2>
+        </div>
+        <div className="modal-body">
+          {anfragen.slice(0, 5).map((a) => {
+            const n = nachrichtVon(a);
+            const letzter = n.verlauf[n.verlauf.length - 1];
+            const istAntwort = n.verlauf.length > 1;
+            const anStandort = n.an.typ === 'standort' && !istAntwort;
+            return (
+              <button key={a.id} type="button" className="nm-popup-eintrag" onClick={() => onOeffnen(a)}>
+                <span className="nm-popup-kopf">
+                  {istAntwort ? 'Antwort von ' : 'Von '}<strong>{letzter ? letzter.autor : n.von.name}</strong>
+                  {anStandort ? <> an <strong>{nachrichtAnName(n)}</strong></> : null}
+                  {letzter ? ' · ' + uhrzeit(letzter.zeit) : ''}
+                  {a.prioritaet === 'Sofort' && <span className="nm-popup-dringend">Dringend</span>}
+                </span>
+                <span className="nm-popup-betreff">{a.name || '(ohne Betreff)'}</span>
+                <span className="nm-popup-text">{letzter ? letzter.text : a.anliegen}</span>
+                <span className="nm-popup-oeffnen">Öffnen <ArrowRight size={12} /></span>
+              </button>
+            );
+          })}
+          {anzahl > 5 && <p className="rf-hinweis">… und {anzahl - 5} weitere – siehe Leiste über dem Board.</p>}
+        </div>
+        <div className="modal-fuss">
+          <span className="rf-hinweis nm-popup-hinweis">Die Nachrichten bleiben im Board, bis sie erledigt sind.</span>
+          <button className="nm-btn-primaer" onClick={onWeg} autoFocus><Check size={14} /> Später ansehen</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Neue Nachricht schreiben: an eine Person oder an einen Standort
+function NachrichtNeuModal({ personen, onClose, onSenden }) {
+  const [typ, setTyp] = useState('person');
+  const [personId, setPersonId] = useState('');
+  const [zielStandort, setZielStandort] = useState(() => andererStandort(normStandort(localStorage.getItem('standortDefault')) || STANDORT_STO));
+  const [kartenStandort, setKartenStandort] = useState(() => normStandort(localStorage.getItem('standortDefault')) || STANDORT_STO);
+  const [betreff, setBetreff] = useState('');
+  const [text, setText] = useState('');
+  const [dringend, setDringend] = useState(false);
+  const [sendet, setSendet] = useState(false);
+  const [fehler, setFehler] = useState('');
+  const person = personen.find((p) => p.id === personId);
+  const bereit = !!betreff.trim() && !!text.trim() && (typ === 'standort' || !!person) && !sendet;
+
+  const absenden = async () => {
+    if (!bereit) return;
+    setSendet(true); setFehler('');
+    try {
+      await onSenden({
+        an: typ === 'standort' ? { typ: 'standort', standort: zielStandort } : { typ: 'person', id: person.id, name: person.name },
+        standort: typ === 'standort' ? zielStandort : kartenStandort,
+        betreff: betreff.trim(), text: text.trim(), dringend,
+      });
+    } catch (e) {
+      setFehler('Nachricht konnte nicht gesendet werden (' + (e.message || 'Netzwerkfehler') + ')');
+      setSendet(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal modal-schmal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-kopf modal-kopf-nm">
+          <h2>Neue Nachricht</h2>
+          <button onClick={onClose} aria-label="Schliessen"><X size={20} /></button>
+        </div>
+        <div className="modal-body">
+          <div className="feld">
+            <label>An</label>
+            <div className="rf-standort-wahl">
+              <button type="button" className={'rf-standort-btn' + (typ === 'person' ? ' aktiv' : '')} onClick={() => setTyp('person')}><User size={14} /> Person</button>
+              <button type="button" className={'rf-standort-btn' + (typ === 'standort' ? ' aktiv' : '')} onClick={() => setTyp('standort')}><Users size={14} /> Standort</button>
+            </div>
+          </div>
+          {typ === 'person' ? (
+            <>
+              <div className="feld nm-feld">
+                <label>Person</label>
+                <select value={personId} onChange={(e) => setPersonId(e.target.value)}>
+                  <option value="">– bitte wählen –</option>
+                  {personen.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                {!personen.length && <span className="rf-hinweis">Personenliste nicht verfügbar – bitte an einen Standort schicken.</span>}
+              </div>
+              <div className="feld nm-feld">
+                <label>Karte erscheint in Offen bei</label>
+                <div className="rf-standort-wahl">
+                  {STANDORT_WAHL.map((s) => (
+                    <button key={s} type="button" className={'rf-standort-btn' + (kartenStandort === s ? ' aktiv' : '')} onClick={() => setKartenStandort(s)}><MapPin size={14} /> {standortName(s)}</button>
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="feld nm-feld">
+              <label>Standort</label>
+              <div className="rf-standort-wahl">
+                {STANDORT_WAHL.map((s) => (
+                  <button key={s} type="button" className={'rf-standort-btn' + (zielStandort === s ? ' aktiv' : '')} onClick={() => setZielStandort(s)}><MapPin size={14} /> {standortName(s)}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="feld nm-feld">
+            <label>Betreff</label>
+            <input type="text" maxLength={120} value={betreff} onChange={(e) => setBetreff(e.target.value)} placeholder="z. B. Rezept Frau Meier liegt hier" />
+          </div>
+          <div className="feld nm-feld">
+            <label>Nachricht</label>
+            <textarea rows={4} maxLength={2000} value={text} onChange={(e) => setText(e.target.value)} />
+          </div>
+          <label className="nm-dringend">
+            <input type="checkbox" checked={dringend} onChange={(e) => setDringend(e.target.checked)} /> Dringend (Priorität „Sofort")
+          </label>
+          {fehler && <p className="rf-fehler">{fehler}</p>}
+        </div>
+        <div className="modal-fuss">
+          <button className="abbrechen-btn" onClick={onClose}>Abbrechen</button>
+          <button className="nm-btn-primaer" disabled={!bereit} onClick={absenden}>
+            <Send size={14} /> {sendet ? 'Sendet…' : 'Senden'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Verlauf einer Nachricht ansehen, antworten, erledigen
+function NachrichtModal({ anfrage, meId, isReadOnly, onOeffnet, onClose, onAntworten, onErledigt }) {
+  const n = nachrichtVon(anfrage);
+  const [text, setText] = useState('');
+  const [sendet, setSendet] = useState(false);
+  const [fehler, setFehler] = useState('');
+  const verlaufRef = useRef(null);
+  const anzahl = n ? n.verlauf.length : 0;
+  // Beim Öffnen und bei jedem neuen Beitrag: als gelesen merken
+  useEffect(() => { onOeffnet && onOeffnet(anfrage); /* eslint-disable-next-line */ }, [anfrage.id, anzahl]);
+  useEffect(() => { if (verlaufRef.current) verlaufRef.current.scrollTop = verlaufRef.current.scrollHeight; }, [anzahl]);
+  const erledigt = anfrage.status === 'Erledigt';
+
+  const antworten = async () => {
+    if (!text.trim() || sendet) return;
+    setSendet(true); setFehler('');
+    try { await onAntworten(text); setText(''); }
+    catch (e) { setFehler('Antwort konnte nicht gesendet werden (' + (e.message || 'Netzwerkfehler') + ')'); }
+    finally { setSendet(false); }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal modal-schmal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-kopf modal-kopf-nm">
+          <h2>{anfrage.name || 'Interne Nachricht'}</h2>
+          <button onClick={onClose} aria-label="Schliessen"><X size={20} /></button>
+        </div>
+        <div className="modal-body">
+          {n ? (
+            <div className="nm-ziel">
+              <MessagesSquare size={15} />
+              <span>
+                Von <strong>{n.von.name}</strong> an <strong>{n.an.typ === 'standort' ? 'Standort ' + nachrichtAnName(n) : nachrichtAnName(n)}</strong>
+                {' · Karte bei ' + standortName(standortVon(anfrage))}{erledigt ? ' · erledigt' : ''}
+              </span>
+            </div>
+          ) : (
+            <p className="rf-hinweis">Verlauf nicht verfügbar.</p>
+          )}
+          {n && (
+            <div className="rf-verlauf nm-verlauf" ref={verlaufRef}>
+              {n.verlauf.map((e, i) => {
+                const eigen = String(e.autorId || '') === meId;
+                return (
+                  <div key={i} className={'rf-eintrag nm-eintrag' + (eigen ? ' nm-eigen' : '')}>
+                    <div className="rf-eintrag-kopf">{e.autor || '—'} · {datumUhrzeit(e.zeit)}</div>
+                    <div className="rf-eintrag-text">{e.text}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {!isReadOnly && n && (
+            <div className="feld">
+              <label>Antwort{erledigt ? ' (öffnet die Karte wieder)' : ''}</label>
+              <textarea rows={3} maxLength={2000} value={text} onChange={(e) => setText(e.target.value)} />
+            </div>
+          )}
+          {isReadOnly && <p className="rf-hinweis">Nur-Lese-Zugriff: Nachrichten können hier nicht beantwortet werden.</p>}
+          {fehler && <p className="rf-fehler">{fehler}</p>}
+        </div>
+        {!isReadOnly && n && (
+          <div className="modal-fuss">
+            <button className="abbrechen-btn" onClick={onClose}>Schließen</button>
+            <div className="rf-fuss-mehr">
+              {!erledigt && (
+                <button className="rf-btn-zurueck" onClick={onErledigt} title="Nachricht erledigt – Karte ins Archiv">
+                  <Check size={14} /> Erledigt
+                </button>
+              )}
+              <button className="nm-btn-primaer" disabled={!text.trim() || sendet} onClick={antworten}>
+                <CornerUpLeft size={14} /> {sendet ? 'Sendet…' : 'Antworten'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
