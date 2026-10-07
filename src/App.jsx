@@ -486,6 +486,24 @@ function nachrichtUngelesen(a, meId) {
   return !gelesen || String(gelesen) < String(letzter.zeit || '');
 }
 const nachrichtFuerMich = (a, meId) => nachrichtBetrifft(a, meId) && nachrichtUngelesen(a, meId);
+// Schlüssel für „weggeklickt": Karte + Zeitpunkt des letzten Beitrags. Kommt ein
+// neuer Beitrag, ändert sich der Schlüssel und das Hinweisfenster erscheint erneut.
+function nachrichtPopupSchluessel(a) {
+  const n = nachrichtVon(a);
+  const letzter = n && n.verlauf.length ? n.verlauf[n.verlauf.length - 1] : null;
+  return String(a.id) + '|' + (letzter ? letzter.zeit : '');
+}
+// Gehört diese Nachricht ins Hinweisfenster?
+//  - alles, was die Person direkt betrifft und ungelesen ist (an mich, Antwort auf meine)
+//  - neue Standort-Nachrichten (noch ohne Antwort) an den Standort dieses Rechners;
+//    ist am Rechner noch kein Standort gemerkt, an beiden Standorten
+function nachrichtFuerPopup(a, meId, meinStandort) {
+  const n = nachrichtVon(a);
+  if (!n || !meId) return false;
+  if (nachrichtFuerMich(a, meId)) return true;
+  return n.an.typ === 'standort' && n.von.id !== meId && n.verlauf.length === 1
+    && nachrichtUngelesen(a, meId) && (!meinStandort || n.an.standort === meinStandort);
+}
 
 // Server-Stand merken / Änderungen ermitteln (für kartenweises Speichern)
 function standMerken(liste) {
@@ -525,6 +543,20 @@ function Dashboard() {
   const [nachrichtAnfrage, setNachrichtAnfrage] = useState(null); // interne Nachricht, deren Verlauf offen ist
   const [nachrichtNeu, setNachrichtNeu] = useState(false);
   const [personen, setPersonen] = useState([]); // mögliche Empfänger:innen (wie Anmeldeliste)
+  // Weggeklickte Hinweisfenster (pro Tab/Anmeldung). Bewusst sessionStorage:
+  // nach neuer Anmeldung erscheinen ungelesene Nachrichten wieder.
+  const popupSpeicher = 'pp_nm_weg_' + String((leseUser() || {}).id || '');
+  const [weggeklickt, setWeggeklickt] = useState(() => {
+    try { return new Set(JSON.parse(sessionStorage.getItem(popupSpeicher) || '[]')); } catch { return new Set(); }
+  });
+  const popupWegklicken = (liste) => {
+    setWeggeklickt((alt) => {
+      const neu = new Set(alt);
+      liste.forEach((a) => neu.add(nachrichtPopupSchluessel(a)));
+      try { sessionStorage.setItem(popupSpeicher, JSON.stringify([...neu].slice(-300))); } catch {}
+      return neu;
+    });
+  };
   const [ergebnisAnfrage, setErgebnisAnfrage] = useState(null);
   const [mailtoAnfrage, setMailtoAnfrage] = useState(null); // { anfrage, ergebnis } für E-Mail-Modal
   const [draftOhneErgebnisAnfrage, setDraftOhneErgebnisAnfrage] = useState(null); // Anfrage, für die "Entwurf erstellen" (ohne Ergebnis) offen ist
@@ -971,6 +1003,12 @@ function Dashboard() {
   // Nachrichten mit ungelesenem Beitrag für die angemeldete Person (auch erledigte
   // nicht, die tauchen erst durch eine neue Antwort wieder auf)
   const fuerMich = sichtbar.filter((a) => nachrichtFuerMich(a, meId));
+  // Hinweisfenster: neue Nachrichten, die hier noch nicht weggeklickt wurden
+  let meinStandort = '';
+  try { meinStandort = normStandort(localStorage.getItem('standortDefault')); } catch {}
+  const popupNachrichten = sichtbar
+    .filter((a) => nachrichtFuerPopup(a, meId, meinStandort))
+    .filter((a) => !weggeklickt.has(nachrichtPopupSchluessel(a)));
   // Offene/beantwortete Standort-Rückfragen (nur auf noch aktiven Karten).
   // Bewusst NICHT von der Suche gefiltert: die Leiste soll immer den
   // Gesamtstand zeigen, damit keine Rückfrage übersehen wird.
@@ -1077,6 +1115,11 @@ function Dashboard() {
             onClose={() => setNachrichtAnfrage(null)}
             onAntworten={(text) => nachrichtAntworten(nachrichtLive, text)}
             onErledigt={() => { cardMove(nachrichtLive, 'Erledigt'); setNachrichtAnfrage(null); }} />
+        )}
+        {popupNachrichten.length > 0 && !nachrichtLive && (
+          <NachrichtPopup anfragen={popupNachrichten} meId={meId}
+            onOeffnen={(a) => { popupWegklicken([a]); setNachrichtAnfrage(a); }}
+            onWeg={() => popupWegklicken(popupNachrichten)} />
         )}
         {nachrichtNeu && !isReadOnly && (
           <NachrichtNeuModal personen={personen.filter((p) => p.id !== meId)}
@@ -1419,7 +1462,7 @@ function NachrichtenLeiste({ anfragen, onOeffnen }) {
   if (!anfragen.length) return null;
   return (
     <div className="nm-leiste">
-      <div className="nm-leiste-kopf"><Mail size={13} /> Neue Nachrichten für dich ({anfragen.length})</div>
+      <div className="nm-leiste-kopf"><Mail size={13} /> Neue Nachrichten für Sie ({anfragen.length})</div>
       <div className="rf-leiste-liste">
         {anfragen.map((a) => {
           const n = nachrichtVon(a);
@@ -1434,6 +1477,47 @@ function NachrichtenLeiste({ anfragen, onOeffnen }) {
             </button>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// Hinweisfenster vorne im Bildschirm: „Sie haben 1 neue Nachricht".
+// Schließt sich nicht durch Klick daneben – nur über „Öffnen" oder „Später ansehen".
+function NachrichtPopup({ anfragen, meId, onOeffnen, onWeg }) {
+  const anzahl = anfragen.length;
+  return (
+    <div className="nm-popup-overlay" role="alertdialog" aria-modal="true" aria-labelledby="nm-popup-titel">
+      <div className="modal modal-schmal nm-popup">
+        <div className="modal-kopf modal-kopf-nm">
+          <h2 id="nm-popup-titel"><Mail size={18} /> Sie haben {anzahl === 1 ? '1 neue Nachricht' : anzahl + ' neue Nachrichten'}</h2>
+        </div>
+        <div className="modal-body">
+          {anfragen.slice(0, 5).map((a) => {
+            const n = nachrichtVon(a);
+            const letzter = n.verlauf[n.verlauf.length - 1];
+            const istAntwort = n.verlauf.length > 1;
+            const anStandort = n.an.typ === 'standort' && !istAntwort;
+            return (
+              <button key={a.id} type="button" className="nm-popup-eintrag" onClick={() => onOeffnen(a)}>
+                <span className="nm-popup-kopf">
+                  {istAntwort ? 'Antwort von ' : 'Von '}<strong>{letzter ? letzter.autor : n.von.name}</strong>
+                  {anStandort ? <> an <strong>{nachrichtAnName(n)}</strong></> : null}
+                  {letzter ? ' · ' + uhrzeit(letzter.zeit) : ''}
+                  {a.prioritaet === 'Sofort' && <span className="nm-popup-dringend">Dringend</span>}
+                </span>
+                <span className="nm-popup-betreff">{a.name || '(ohne Betreff)'}</span>
+                <span className="nm-popup-text">{letzter ? letzter.text : a.anliegen}</span>
+                <span className="nm-popup-oeffnen">Öffnen <ArrowRight size={12} /></span>
+              </button>
+            );
+          })}
+          {anzahl > 5 && <p className="rf-hinweis">… und {anzahl - 5} weitere – siehe Leiste über dem Board.</p>}
+        </div>
+        <div className="modal-fuss">
+          <span className="rf-hinweis nm-popup-hinweis">Die Nachrichten bleiben im Board, bis sie erledigt sind.</span>
+          <button className="nm-btn-primaer" onClick={onWeg} autoFocus><Check size={14} /> Später ansehen</button>
+        </div>
       </div>
     </div>
   );

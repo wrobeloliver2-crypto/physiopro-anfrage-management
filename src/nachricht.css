@@ -48,3 +48,21 @@
 @media (max-width:640px) {
   .rf-eintrag.nm-eintrag, .rf-eintrag.nm-eintrag.nm-eigen { margin-left:0; margin-right:0; }
 }
+
+/* ── Hinweisfenster „Sie haben … neue Nachricht" ──
+   Liegt über allen anderen Fenstern (auch über einem offenen Karten-Modal),
+   schließt sich nicht durch Klick daneben. */
+.nm-popup-overlay { position:fixed; inset:0; background:rgba(44,40,37,.55); display:flex; align-items:center; justify-content:center; padding:20px; z-index:1200; animation:nm-popup-ein .18s ease-out; }
+.nm-popup { box-shadow:0 24px 70px rgba(44,40,37,.4); }
+.nm-popup .modal-kopf h2 { display:flex; align-items:center; gap:9px; }
+.nm-popup-eintrag { display:flex; flex-direction:column; gap:4px; text-align:left; width:100%; background:var(--nm-hell); border:1px solid var(--nm-rand); border-radius:10px; padding:11px 13px; cursor:pointer; font-family:var(--sans); transition:.15s; }
+.nm-popup-eintrag:hover { border-color:var(--nm); box-shadow:0 2px 10px rgba(79,107,106,.15); }
+.nm-popup-kopf { display:flex; align-items:center; flex-wrap:wrap; gap:4px; font-size:11px; color:var(--nm-dunkel); }
+.nm-popup-kopf strong { font-weight:600; }
+.nm-popup-dringend { margin-left:6px; font-size:9px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:#fff; background:var(--rot); border-radius:100px; padding:2px 8px; }
+.nm-popup-betreff { font-size:15px; font-weight:500; color:var(--text); }
+.nm-popup-text { font-size:12.5px; color:var(--text-mid); line-height:1.45; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; white-space:pre-wrap; }
+.nm-popup-oeffnen { align-self:flex-end; display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:500; color:var(--nm-dunkel); }
+.nm-popup-hinweis { margin:0; }
+@keyframes nm-popup-ein { from { opacity:0; } to { opacity:1; } }
+@media (prefers-reduced-motion: reduce) { .nm-popup-overlay { animation:none; } }
