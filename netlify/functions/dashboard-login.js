@@ -7,19 +7,17 @@
 //   POST { userId, pin } -> { token, user } bei Erfolg
 //
 // Ablauf POST:
-//   1. Darf die Person ueberhaupt ins Dashboard? Pruefung in der
-//      Mitarbeiter-DB (View v_anfragen_zugang: Taetigkeit Rezeption oder
-//      Admin). Die DB-Rolle dafuer sieht NUR diese View.
+//   1. Darf die Person ueberhaupt ins Dashboard? Personenliste vom
+//      Mitarbeiter-Dienst (auth/bootstrap, inkl. Taetigkeiten). Zugelassen:
+//      Physio Pro und Taetigkeit "rezeption" – oder Rolle admin.
 //   2. PIN-Pruefung macht der zentrale Mitarbeiter-Dienst (mitarbeiter-api,
 //      app "anfragen") – inkl. Sperre nach Fehlversuchen und Login-Protokoll.
 //   3. Erst dann stellt das Dashboard sein eigenes Token aus (auth.cjs).
 //
 // Env:
-//   MITARBEITER_DATABASE_URL  Nur-Lese-Zugang (Rolle anfragen_lesen)
 //   MITARBEITER_API_URL       Standard https://mitarbeiter-api.netlify.app
 //   DASHBOARD_TOKEN_SECRET
 // ====================================================================
-const { neon } = require('@neondatabase/serverless');
 const { tokenErstellen, tokenLesen, CORS_HEADERS, geheimnis } = require('../lib/auth.cjs');
 
 const API_URL = (process.env.MITARBEITER_API_URL || 'https://mitarbeiter-api.netlify.app').replace(/\/+$/, '');
@@ -39,13 +37,20 @@ const FEHLERTEXTE = {
   unbekannt: 'Person nicht gefunden',
 };
 
-let _sql = null;
-function mitarbeiterDb() {
-  if (!_sql) _sql = neon(process.env.MITARBEITER_DATABASE_URL);
-  return _sql;
+const FIRMA_KURZ = 'physiopro';
+
+async function dienst(action, data) {
+  const res = await mitZeitlimit(fetch(API_URL + '/.netlify/functions/auth', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, app: 'anfragen', data }),
+  }), 8000, 'Mitarbeiter-Dienst');
+  const r = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error('Mitarbeiter-Dienst HTTP ' + res.status);
+  return r;
 }
 
-// Mit Zeitlimit, damit ein haengender DB-Aufruf als klarer Fehler zurueckkommt
+// Mit Zeitlimit, damit ein haengender Aufruf als klarer Fehler zurueckkommt
 function mitZeitlimit(promise, ms, was) {
   let t;
   return Promise.race([
@@ -54,18 +59,26 @@ function mitZeitlimit(promise, ms, was) {
   ]).finally(() => clearTimeout(t));
 }
 
+// Wer darf ins Dashboard? Physio Pro + Taetigkeit Rezeption, oder Admin.
 async function zugelassene() {
-  return mitZeitlimit(mitarbeiterDb().query(
-    `SELECT mitarbeiter_firma_id, anzeigename, ist_admin, ist_rezeption, pin_gesetzt
-       FROM v_anfragen_zugang
-      ORDER BY ist_admin, anzeigename`
-  ), 6000, 'Mitarbeiter-DB');
+  const r = await dienst('bootstrap', { nurAntragsberechtigte: false });
+  const personen = Array.isArray(r.personen) ? r.personen : [];
+  return personen
+    .filter((p) => p.firma === FIRMA_KURZ)
+    .filter((p) => p.rolle === 'admin' || (Array.isArray(p.taetigkeiten) && p.taetigkeiten.includes('rezeption')))
+    .map((p) => ({
+      mitarbeiter_firma_id: Number(p.id),
+      anzeigename: (p.rufname || '').trim() || p.name,
+      ist_admin: p.rolle === 'admin',
+      pin_gesetzt: !!p.pinGesetzt,
+    }))
+    .sort((a, b) => (a.ist_admin - b.ist_admin) || a.anzeigename.localeCompare(b.anzeigename, 'de'));
 }
 
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return antwort(200, { success: true });
-  if (!geheimnis() || !process.env.MITARBEITER_DATABASE_URL) {
-    return antwort(500, { success: false, error: 'Server nicht konfiguriert (DASHBOARD_TOKEN_SECRET / MITARBEITER_DATABASE_URL fehlt)' });
+  if (!geheimnis()) {
+    return antwort(500, { success: false, error: 'Server nicht konfiguriert (DASHBOARD_TOKEN_SECRET fehlt)' });
   }
 
   try {
@@ -102,14 +115,11 @@ exports.handler = async (event) => {
     if (!person) return antwort(403, { success: false, error: FEHLERTEXTE.app_gesperrt });
 
     // 2. PIN beim zentralen Mitarbeiter-Dienst pruefen
-    const res = await mitZeitlimit(fetch(API_URL + '/.netlify/functions/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'login', app: 'anfragen', data: { userId, pin } }),
-    }), 8000, 'Mitarbeiter-Dienst');
-    const r = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      console.error('mitarbeiter-api antwortet', res.status, r);
+    let r;
+    try {
+      r = await dienst('login', { userId, pin });
+    } catch (e) {
+      console.error('mitarbeiter-api', e);
       return antwort(502, { success: false, error: 'Anmeldedienst gerade nicht erreichbar' });
     }
     if (r.error || !r.token) {
