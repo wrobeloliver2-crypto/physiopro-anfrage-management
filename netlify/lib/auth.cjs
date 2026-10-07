@@ -3,7 +3,8 @@
 // --------------------------------------------------------------------
 // Anmeldung pro Person mit der PIN aus der Mitarbeiter-Datenbank
 // (dashboard-login). Zugelassen ist nur, wer dort die Taetigkeit
-// "Rezeption" hat oder Admin ist (View v_anfragen_zugang). Bei Erfolg
+// "Rezeption" hat oder Admin ist (Personenliste des Mitarbeiter-Dienstes,
+// Feld taetigkeiten). Bei Erfolg
 // stellt das Dashboard ein eigenes, signiertes Token aus, das Name und
 // Rechte der Person enthaelt. Jede Daten-Function verlangt es im Header
 //   Authorization: Bearer <token>
@@ -26,8 +27,11 @@ function kennwort() {
   return process.env.DASHBOARD_PW || process.env.VITE_DASHBOARD_PW || '';
 }
 
-// Personen, die alles sehen, aber nichts aendern duerfen (wie bisher READ_ONLY_USERS)
-const NUR_LESEN = ['Oliver Wrobel'];
+// Personen, die alles sehen, aber nichts aendern duerfen (wie bisher READ_ONLY_USERS).
+// Abgleich ueber die feste id des Physio-Pro-Verhaeltnisses (mitarbeiter_firma.id),
+// nicht ueber den Namen – ein spaeter gesetzter Rufname aendert daran nichts.
+const NUR_LESEN_IDS = [34]; // Oliver Wrobel
+const NUR_LESEN = ['Oliver Wrobel']; // nur noch fuer die Anzeige im Frontend
 
 function b64url(buf) {
   return Buffer.from(buf).toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
@@ -50,7 +54,7 @@ function tokenErstellen(person = {}) {
     mf: person.mf || null,
     name: person.name || '',
     rolle: person.rolle || 'mitarbeiter',
-    lesend: NUR_LESEN.includes(person.name || ''),
+    lesend: NUR_LESEN_IDS.includes(Number(person.mf)),
   };
   const payload = b64url(JSON.stringify(daten));
   return payload + '.' + signatur(payload);
