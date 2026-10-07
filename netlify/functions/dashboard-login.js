@@ -45,12 +45,21 @@ function mitarbeiterDb() {
   return _sql;
 }
 
+// Mit Zeitlimit, damit ein haengender DB-Aufruf als klarer Fehler zurueckkommt
+function mitZeitlimit(promise, ms, was) {
+  let t;
+  return Promise.race([
+    promise,
+    new Promise((_, nein) => { t = setTimeout(() => nein(new Error(was + ': Zeitlimit ' + ms + ' ms')), ms); }),
+  ]).finally(() => clearTimeout(t));
+}
+
 async function zugelassene() {
-  return mitarbeiterDb().query(
+  return mitZeitlimit(mitarbeiterDb().query(
     `SELECT mitarbeiter_firma_id, anzeigename, ist_admin, ist_rezeption, pin_gesetzt
        FROM v_anfragen_zugang
       ORDER BY ist_admin, anzeigename`
-  );
+  ), 6000, 'Mitarbeiter-DB');
 }
 
 exports.handler = async (event) => {
@@ -86,11 +95,11 @@ exports.handler = async (event) => {
     if (!person) return antwort(403, { success: false, error: FEHLERTEXTE.app_gesperrt });
 
     // 2. PIN beim zentralen Mitarbeiter-Dienst pruefen
-    const res = await fetch(API_URL + '/.netlify/functions/auth', {
+    const res = await mitZeitlimit(fetch(API_URL + '/.netlify/functions/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'login', app: 'anfragen', data: { userId, pin } }),
-    });
+    }), 8000, 'Mitarbeiter-Dienst');
     const r = await res.json().catch(() => ({}));
     if (!res.ok) {
       console.error('mitarbeiter-api antwortet', res.status, r);
@@ -114,6 +123,6 @@ exports.handler = async (event) => {
     });
   } catch (err) {
     console.error('dashboard-login Fehler:', err);
-    return antwort(500, { success: false, error: 'Anmeldung gerade nicht möglich' });
+    return antwort(500, { success: false, error: 'Anmeldung gerade nicht möglich', detail: String((err && err.message) || err).slice(0, 200) });
   }
 };
