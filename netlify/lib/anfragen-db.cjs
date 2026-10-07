@@ -49,8 +49,9 @@ const FELDER = {
   gclid: 'gclid',
   standort: 'standort',
   klaerung: 'klaerung',
+  nachricht: 'nachricht',
 };
-const JSON_FELDER = ['history', 'klaerung'];
+const JSON_FELDER = ['history', 'klaerung', 'nachricht'];
 const TEXT_SPALTEN = Object.entries(FELDER).filter(([k]) => !JSON_FELDER.includes(k)).map(([, s]) => s);
 
 function alsArray(v) {
@@ -76,6 +77,7 @@ function zeileZuAnfrage(z) {
     const wert = z[spalte];
     if (feld === 'history') a.history = alsArray(wert);
     else if (feld === 'klaerung') a.klaerung = alsObjektOderNull(wert);
+    else if (feld === 'nachricht') a.nachricht = alsObjektOderNull(wert);
     else a[feld] = wert === null || wert === undefined ? '' : String(wert);
   }
   return a;
@@ -88,6 +90,7 @@ function anfrageZuZeile(a) {
     const wert = a[feld];
     if (feld === 'history') z.history = alsArray(wert);
     else if (feld === 'klaerung') z.klaerung = alsObjektOderNull(wert);
+    else if (feld === 'nachricht') z.nachricht = alsObjektOderNull(wert);
     else z[spalte] = wert === null || wert === undefined ? '' : String(wert);
   }
   return z;
@@ -142,6 +145,8 @@ function historyVereinen(alt, neu, autor) {
 // normalen Dashboard-Speichern bleibt die Klaerung unangetastet, sie
 // wird ausschliesslich von klaerung-update geschrieben.
 // optionen.historyErsetzen: true nur bei Migration (Sheet ist Quelle).
+// Die interne Nachricht (Spalte nachricht) schreibt ausschliesslich
+// nachricht-api – hier weder beim Anlegen noch beim Aktualisieren.
 const SPALTENLISTE = [...TEXT_SPALTEN, 'history', 'klaerung'];
 const RECORD_DEF = [...TEXT_SPALTEN.map((s) => s + ' text'), 'history jsonb', 'klaerung jsonb'].join(', ');
 
