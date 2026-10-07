@@ -21,6 +21,8 @@
 // Reihenfolge, Zeile 1 = Header.
 // ====================================================================
 const { google } = require('googleapis');
+const { zugriffPruefen, sitzungAus, CORS_HEADERS } = require('../lib/auth.cjs');
+const { dbAktiv, sql } = require('../lib/anfragen-db.cjs');
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 
@@ -97,9 +99,7 @@ const jsonResponse = (statusCode, body) => ({
   statusCode,
   headers: {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    ...CORS_HEADERS,
   },
   body: JSON.stringify(body),
 });
@@ -109,7 +109,12 @@ exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return jsonResponse(405, { success: false, error: 'Method not allowed' });
   }
-  if (!SHEET_ID || !process.env.GOOGLE_SERVICE_ACCOUNT) {
+  if (process.env.DASHBOARD_TOKEN_SECRET) {
+    const verweigert = zugriffPruefen(event);
+    if (verweigert) return verweigert;
+    if (sitzungAus(event).lesend) return jsonResponse(403, { success: false, error: 'Nur Lesezugriff' });
+  }
+  if (!dbAktiv() && (!SHEET_ID || !process.env.GOOGLE_SERVICE_ACCOUNT)) {
     return jsonResponse(500, {
       success: false,
       error: 'Server nicht konfiguriert (GOOGLE_SHEET_ID / GOOGLE_SERVICE_ACCOUNT fehlt)',
@@ -128,16 +133,42 @@ exports.handler = async (event) => {
 
   const klaerung = saubereKlaerung(payload.klaerung);
   if (!klaerung) return jsonResponse(400, { success: false, error: 'klaerung unvollständig oder unzulässig' });
+  // Mit Anmeldung: Autor des neuesten Verlaufseintrags ist die angemeldete Person
+  const sitzungsName = (sitzungAus(event) || {}).name;
+  if (sitzungsName && klaerung.verlauf.length) {
+    klaerung.verlauf[klaerung.verlauf.length - 1].autor = sitzungsName;
+  }
 
   const histEintrag = payload.historyEintrag && typeof payload.historyEintrag === 'object'
     ? {
         zeitstempel: typeof payload.historyEintrag.zeitstempel === 'string'
           ? payload.historyEintrag.zeitstempel : new Date().toISOString(),
         aktion: String(payload.historyEintrag.aktion || 'Rückfrage').slice(0, 60),
-        von: String(payload.historyEintrag.von || '').slice(0, 120),
+        // Mit Anmeldung: Name aus der Sitzung, nicht aus dem Browser
+        von: String((sitzungAus(event) || {}).name || payload.historyEintrag.von || '').slice(0, 120),
         details: String(payload.historyEintrag.details || '').slice(0, MAX_TEXT),
       }
     : null;
+
+  // ---- Datenbank: nur Klaerung + ein History-Eintrag, atomar in einem UPDATE ----
+  if (dbAktiv()) {
+    try {
+      const r = await sql().query(
+        `UPDATE anfragen
+            SET klaerung = $2::jsonb,
+                history = CASE WHEN $3::jsonb IS NULL THEN history ELSE history || jsonb_build_array($3::jsonb) END,
+                geaendert_am = now()
+          WHERE id = $1
+          RETURNING id`,
+        [id, JSON.stringify(klaerung), histEintrag ? JSON.stringify(histEintrag) : null]
+      );
+      if (!r.length) return jsonResponse(404, { success: false, error: 'Anfrage nicht gefunden (id ' + id + ')' });
+      return jsonResponse(200, { success: true, id });
+    } catch (err) {
+      console.error('klaerung-update DB-Fehler:', err);
+      return jsonResponse(500, { success: false, error: 'Datenbankfehler: ' + (err.message || 'unknown') });
+    }
+  }
 
   try {
     const sheets = getSheets();

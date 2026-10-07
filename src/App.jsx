@@ -17,7 +17,40 @@ import './rueckfrage.css';
 // automatisch seine eigene Function (Test-Sheet), der main-Deploy seine (Live-Sheet).
 // Nur als Override (z.B. lokale Entwicklung) kann VITE_BACKEND_BASE gesetzt werden.
 const BACKEND_BASE = import.meta.env.VITE_BACKEND_BASE || '';
-const API_URL = BACKEND_BASE + '/.netlify/functions/sheets-api';
+// Seit Oktober 2026: Daten in Postgres (Neon) statt Google Sheet.
+// anfragen-api speichert nur geaenderte Karten (siehe saveToSheets).
+const API_URL = BACKEND_BASE + '/.netlify/functions/anfragen-api';
+const LOGIN_URL = BACKEND_BASE + '/.netlify/functions/dashboard-login';
+const DRAFT_URL = BACKEND_BASE + '/.netlify/functions/draft-create';
+
+// --------------------------------------------------------------------
+// Anmeldung: Das Kennwort wird serverseitig geprueft (dashboard-login),
+// das Token liegt nur im sessionStorage dieses Tabs. Jede Daten-Function
+// verlangt es. Laeuft es ab oder ist es ungueltig, erscheint wieder die
+// Kennwort-Abfrage.
+// --------------------------------------------------------------------
+const TOKEN_KEY = 'pp_token';
+const USER_KEY = 'pp_user';
+function leseUser() { try { return JSON.parse(sessionStorage.getItem(USER_KEY) || 'null'); } catch { return null; } }
+function abmelden() {
+  try { sessionStorage.removeItem(USER_KEY); } catch {}
+  setzeToken('');
+  window.dispatchEvent(new Event(ABGEMELDET_EVENT));
+}
+const ABGEMELDET_EVENT = 'pp-abgemeldet';
+function leseToken() { try { return sessionStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; } }
+function setzeToken(t) { try { if (t) sessionStorage.setItem(TOKEN_KEY, t); else sessionStorage.removeItem(TOKEN_KEY); } catch {} }
+async function apiFetch(url, optionen = {}) {
+  const headers = { ...(optionen.headers || {}) };
+  const token = leseToken();
+  if (token) headers.Authorization = 'Bearer ' + token;
+  const res = await fetch(url, { ...optionen, headers });
+  if (res.status === 401) {
+    setzeToken('');
+    window.dispatchEvent(new Event(ABGEMELDET_EVENT));
+  }
+  return res;
+}
 const NOTES_URL = BACKEND_BASE + '/.netlify/functions/notes-api';
 const WEITERLEITUNG_URL = BACKEND_BASE + '/.netlify/functions/weiterleitung-send';
 // Feldgranulares Schreiben der Standort-Rückfrage: schreibt NUR die Klärungs-
@@ -32,7 +65,6 @@ const PRIORITAETEN = ['Sofort', 'Normal', 'Niedrig'];
 const BEARBEITER = ['Finn', 'Annika', 'Petra Drewitz', 'Vera Köhn', 'Antje Dreyer', 'Katy', 'Laura Klemme', 'Unzugewiesen'];
 const QUELLEN = ['Website', 'Telefon-Benachrichtigung', 'Manuell erfasst'];
 const READ_ONLY_USERS = ['Oliver Wrobel'];
-const ALLE_USER = ['Finn', 'Annika', 'Petra Drewitz', 'Vera Köhn', 'Antje Dreyer', 'Katy', 'Laura Klemme', 'Oliver Wrobel', 'Hanna Wrobel'];
 
 // Bearbeitungs-Schritte, getrennt nach aktiv (In Bearbeitung) / haengt (To Do)
 const SCHRITTE_AKTIV = ['Rückruf vereinbart', 'Prüfe Terminverfügbarkeit', 'Termin wird abgestimmt'];
@@ -412,6 +444,26 @@ function wartedauerLabel(min) {
   return 'seit ' + tage + ' Tag' + (tage === 1 ? '' : 'en');
 }
 
+// Server-Stand merken / Änderungen ermitteln (für kartenweises Speichern)
+function standMerken(liste) {
+  const m = new Map();
+  (liste || []).forEach((a) => { if (a && a.id) m.set(String(a.id), JSON.stringify(a)); });
+  return m;
+}
+function aenderungenErmitteln(stand, liste) {
+  const upsert = [];
+  const ids = new Set();
+  (liste || []).forEach((a) => {
+    if (!a || !a.id) return;
+    const id = String(a.id);
+    ids.add(id);
+    if (stand.get(id) !== JSON.stringify(a)) upsert.push(a);
+  });
+  const loeschen = [];
+  stand.forEach((_, id) => { if (!ids.has(id)) loeschen.push(id); });
+  return { upsert, loeschen };
+}
+
 // ====================================================================
 // Haupt-Komponente
 // ====================================================================
@@ -419,7 +471,10 @@ function Dashboard() {
   const [anfragen, setAnfragen] = useState([]);
   const [notizen, setNotizen] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState(() => localStorage.getItem('currentUser') || 'Unzugewiesen');
+  // Angemeldete Person aus dem PIN-Login (Mitarbeiter-Datenbank). Kein
+  // freies Umschalten mehr: der Name steht automatisch im Kartenverlauf.
+  const angemeldet = leseUser() || {};
+  const currentUser = angemeldet.name || 'Unbekannt';
   const [showNewForm, setShowNewForm] = useState(false);
   const [selectedAnfrage, setSelectedAnfrage] = useState(null);
   const [weiterleitenAnfrage, setWeiterleitenAnfrage] = useState(null);
@@ -432,7 +487,7 @@ function Dashboard() {
   const [ansicht, setAnsicht] = useState('aktiv'); // 'aktiv' | 'muelleimer'
   const [suchbegriff, setSuchbegriff] = useState('');
 
-  const isReadOnly = READ_ONLY_USERS.includes(currentUser);
+  const isReadOnly = !!angemeldet.lesend || READ_ONLY_USERS.includes(currentUser);
 
   // Race-Condition-Schutz: Solange ein Speichervorgang (saveToSheets) noch läuft,
   // überschreibt ein zeitgleicher Auto-Refresh (loadFromSheets) NICHT den lokalen
@@ -442,9 +497,13 @@ function Dashboard() {
   // Stand am Ende garantiert mit dem Server übereinstimmt.
   const pendingSaves = useRef(0);
   const refreshNachSave = useRef(false);
+  // Letzter bekannter Server-Stand je Karte (id -> JSON). Beim Speichern
+  // werden nur Karten geschickt, die davon abweichen, plus gelöschte ids.
+  // So kann ein Rechner nie mehr Karten überschreiben, die er gar nicht
+  // angefasst hat.
+  const serverStand = useRef(new Map());
 
   useEffect(() => { loadFromSheets(); loadNotes(); /* eslint-disable-next-line */ }, []);
-  useEffect(() => { localStorage.setItem('currentUser', currentUser); }, [currentUser]);
   useEffect(() => {
     const t = setInterval(() => { loadFromSheets(); loadNotes(); }, 60000);
     return () => clearInterval(t); /* eslint-disable-next-line */
@@ -453,8 +512,9 @@ function Dashboard() {
   const loadFromSheets = useCallback(async (versuch=0) => {
     setLoading(true); setError(null);
     try {
-      const res = await fetch(API_URL, { method:'GET' });
-      if (res.status === 403) throw new Error('Keine Berechtigung fuer Google Sheet');
+      const res = await apiFetch(API_URL, { method:'GET' });
+      if (res.status === 401) return; // Anmeldung abgelaufen -> Kennwort-Abfrage erscheint
+      if (res.status === 403) throw new Error('Keine Berechtigung');
       if (res.status === 429) throw new Error('Zu viele Anfragen. Bitte warten...');
       if (!res.ok) throw new Error('Verbindung fehlgeschlagen');
       const json = await res.json();
@@ -473,6 +533,7 @@ function Dashboard() {
       // Alle Daten bleiben erhalten (auch ältere Erledigte) → für spätere Auswertung.
       // Die Begrenzung auf 14 Tage erfolgt NUR bei der Archiv-Anzeige, nicht beim
       // Laden/Speichern. Damit fällt nichts mehr aus dem Sheet.
+      serverStand.current = standMerken(migriert);
       setAnfragen(migriert); setLetzteAenderung(new Date());
     } catch (e) {
       if (versuch < 2) { setTimeout(() => loadFromSheets(versuch+1), 3000); return; }
@@ -482,7 +543,7 @@ function Dashboard() {
 
   const loadNotes = useCallback(async () => {
     try {
-      const res = await fetch(NOTES_URL, { method:'GET' });
+      const res = await apiFetch(NOTES_URL, { method:'GET' });
       if (!res.ok) return;
       const json = await res.json();
       setNotizen(Array.isArray(json.data) ? json.data : []);
@@ -490,10 +551,15 @@ function Dashboard() {
   }, []);
 
   const saveToSheets = useCallback(async (data) => {
+    const { upsert, loeschen } = aenderungenErmitteln(serverStand.current, data);
+    if (!upsert.length && !loeschen.length) return;
     pendingSaves.current += 1;
     try {
-      const res = await fetch(API_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ anfragen: data }) });
+      const res = await apiFetch(API_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ upsert, loeschen }) });
+      if (res.status === 409) { window.location.reload(); return; }
       if (!res.ok) throw new Error('Speichern fehlgeschlagen');
+      upsert.forEach((a) => serverStand.current.set(String(a.id), JSON.stringify(a)));
+      loeschen.forEach((id) => serverStand.current.delete(id));
       setLetzteAenderung(new Date());
     } catch { setError('Verbindung fehlgeschlagen - Aenderung evtl. nicht gespeichert'); }
     finally {
@@ -510,7 +576,7 @@ function Dashboard() {
   const persist = (data) => { setAnfragen(data); saveToSheets(data); };
 
   const saveNotes = useCallback(async (data) => {
-    try { await fetch(NOTES_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ notizen: data }) }); setLetzteAenderung(new Date()); }
+    try { await apiFetch(NOTES_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ notizen: data }) }); setLetzteAenderung(new Date()); }
     catch { setError('Notiz konnte evtl. nicht gespeichert werden'); }
   }, []);
   const persistNotes = (data) => { setNotizen(data); saveNotes(data); };
@@ -674,7 +740,7 @@ function Dashboard() {
   };
   const sendeWeiterleitungsMail = async (anfrage, an) => {
     try {
-      const res = await fetch(WEITERLEITUNG_URL, {
+      const res = await apiFetch(WEITERLEITUNG_URL, {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
           an,
@@ -708,7 +774,7 @@ function Dashboard() {
   // (klaerung-update schreibt nur die Klärungs- und die History-Zelle).
   const sendeKlaerung = async (anfrage, neueKlaerung, histEintrag) => {
     try {
-      const res = await fetch(KLAERUNG_URL, {
+      const res = await apiFetch(KLAERUNG_URL, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: anfrage.id, klaerung: neueKlaerung, historyEintrag: histEintrag }),
       });
@@ -810,7 +876,7 @@ function Dashboard() {
           erledigtHeute={erledigtHeute} weitergeleitetHeute={weitergeleitetHeute}
           rueckfragenCount={rueckfragen.length}
           letzteAenderung={letzteAenderung} currentUser={currentUser}
-          setCurrentUser={setCurrentUser} isReadOnly={isReadOnly}
+          isReadOnly={isReadOnly}
           suchbegriff={suchbegriff} setSuchbegriff={setSuchbegriff}
           onNeu={() => setShowNewForm(true)} onRefresh={() => { loadFromSheets(); loadNotes(); }}
         />
@@ -907,7 +973,7 @@ function Dashboard() {
 // ====================================================================
 // Kopfzeile
 // ====================================================================
-function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeute, rueckfragenCount, letzteAenderung, currentUser, setCurrentUser, isReadOnly, suchbegriff, setSuchbegriff, onNeu, onRefresh }) {
+function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeute, rueckfragenCount, letzteAenderung, currentUser, isReadOnly, suchbegriff, setSuchbegriff, onNeu, onRefresh }) {
   const aenderungsZeit = letzteAenderung ? letzteAenderung.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}) : '—';
   return (
     <div className="kopfzeile">
@@ -938,9 +1004,10 @@ function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeut
       </div>
       <div className="kopf-rechts">
         <span className="kopf-stats">{offeneCount} offen{sofortCount>0 ? ' · '+sofortCount+' sofort' : ''}</span>
-        <select className="user-select" aria-label="Benutzer" value={currentUser} onChange={(e) => setCurrentUser(e.target.value)}>
-          {ALLE_USER.map((b) => <option key={b} value={b}>{b}</option>)}
-        </select>
+        <span className="user-select" title={isReadOnly ? 'Nur Lesezugriff' : 'Angemeldet'}>
+          <User size={13} /> {currentUser}{isReadOnly ? ' · nur lesen' : ''}
+        </span>
+        <button type="button" className="user-select" onClick={abmelden} title="Abmelden / Person wechseln">Abmelden</button>
         {!isReadOnly && <button className="neu-btn" onClick={onNeu}><Plus size={14} /> Neue Anfrage</button>}
       </div>
     </div>
@@ -1468,7 +1535,7 @@ function DraftModal({ anfrage, ergebnis, onClose, onBack, onErfolg, onKeineEmail
   const entwurfErstellen = async () => {
     setStatus('sende'); setFehler('');
     try {
-      const res = await fetch('/.netlify/functions/draft-create', {
+      const res = await apiFetch(DRAFT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1910,64 +1977,115 @@ function NeueAnfrageForm({ onClose, onSubmit, onMerge, checkDuplicate }) {
   );
 }
 
-// ====================================================================
-// Passwort-Gate — schlichter Zugangsschutz vor dem gesamten Dashboard.
-// Prueft gegen VITE_DASHBOARD_PW (Netlify-Env, pro Deploy-Kontext).
-// Merkt den Zugang in sessionStorage: uebersteht den 60s-Auto-Refresh,
-// ist aber beim Schliessen des Tabs wieder weg.
-// ====================================================================
+// Anmeldung pro Person: Name antippen, persönliche PIN eingeben (dieselbe
+// wie in der Zeiterfassung). Angezeigt werden nur Personen mit der Tätigkeit
+// „Rezeption" oder Admin-Rolle in der Mitarbeiter-Datenbank; die Prüfung
+// passiert zusätzlich serverseitig (dashboard-login). Token + Person liegen
+// im sessionStorage dieses Tabs (max. 12 Std); wird ein Token abgelehnt
+// (401), meldet apiFetch das per Event und der Anmeldebildschirm erscheint.
 function PasswortGate({ children }) {
-  const ERWARTET = import.meta.env.VITE_DASHBOARD_PW;
-  const [frei, setFrei] = useState(() => sessionStorage.getItem('pp_auth') === 'ok');
-  const [eingabe, setEingabe] = useState('');
-  const [fehler, setFehler] = useState(false);
+  const [frei, setFrei] = useState(() => !!leseToken() && !!leseUser());
+  const [personen, setPersonen] = useState(null);
+  const [auswahl, setAuswahl] = useState(null);
+  const [pin, setPin] = useState('');
+  const [fehler, setFehler] = useState('');
+  const [pruefend, setPruefend] = useState(false);
 
-  // Sicherung: fehlt die Env-Variable, NICHT einfach durchlassen (sonst waere
-  // das Gate bei versehentlich leerer Variable wirkungslos).
-  if (!ERWARTET) {
-    return (
-      <div style={gateWrap}>
-        <div style={gateBox}>
-          <h2 style={{ color: '#55725e', marginTop: 0 }}>Konfigurationsfehler</h2>
-          <p style={{ color: '#666' }}>
-            Das Zugangs-Kennwort ist nicht gesetzt. Bitte die Netlify-Variable{' '}
-            <code>VITE_DASHBOARD_PW</code> fuer diese Umgebung hinterlegen.
-          </p>
-        </div>
-      </div>
-    );
-  }
+  useEffect(() => {
+    const weg = () => { try { sessionStorage.removeItem(USER_KEY); } catch {} setFrei(false); setAuswahl(null); setPin(''); };
+    window.addEventListener(ABGEMELDET_EVENT, weg);
+    return () => window.removeEventListener(ABGEMELDET_EVENT, weg);
+  }, []);
+
+  useEffect(() => {
+    if (frei || personen) return;
+    fetch(LOGIN_URL, { method: 'GET' })
+      .then((r) => r.json())
+      .then((d) => { if (d && Array.isArray(d.personen)) setPersonen(d.personen); else setFehler((d && d.error) || 'Liste nicht ladbar'); })
+      .catch(() => setFehler('Keine Verbindung'));
+  }, [frei, personen]);
 
   if (frei) return children;
 
-  const pruefen = () => {
-    if (eingabe === ERWARTET) {
-      sessionStorage.setItem('pp_auth', 'ok');
-      setFrei(true);
-    } else {
-      setFehler(true);
+  const anmelden = async () => {
+    if (pruefend || !auswahl) return;
+    setPruefend(true); setFehler('');
+    try {
+      const res = await fetch(LOGIN_URL, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: auswahl.id, pin }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.token && data.user) {
+        setzeToken(data.token);
+        try { sessionStorage.setItem(USER_KEY, JSON.stringify(data.user)); } catch {}
+        setPin('');
+        setFrei(true);
+      } else {
+        setFehler((data && data.error) || 'Anmeldung fehlgeschlagen');
+        setPin('');
+      }
+    } catch {
+      setFehler('Keine Verbindung');
+    } finally {
+      setPruefend(false);
     }
   };
 
+  const team = (personen || []).filter((p) => !p.verwaltung);
+  const verwaltung = (personen || []).filter((p) => p.verwaltung);
+  const knopf = (p) => (
+    <button key={p.id} type="button" onClick={() => { setAuswahl(p); setPin(''); setFehler(''); }}
+      style={{ ...gateName, ...(auswahl && auswahl.id === p.id ? gateNameAktiv : {}) }}>
+      {p.name}
+    </button>
+  );
+
   return (
     <div style={gateWrap}>
-      <div style={gateBox}>
+      <div style={{ ...gateBox, width: 380 }}>
         <img
           src="/logo-physio.svg"
           alt="PhysioPro Lübeck"
           style={{ width: 150, height: 'auto', margin: '0 auto 1.25rem', display: 'block' }}
         />
-        <p style={{ color: '#666', marginTop: 0 }}>Bitte Kennwort eingeben</p>
-        <input
-          type="password"
-          value={eingabe}
-          autoFocus
-          onChange={(e) => { setEingabe(e.target.value); setFehler(false); }}
-          onKeyDown={(e) => { if (e.key === 'Enter') pruefen(); }}
-          style={gateInput}
-        />
-        {fehler && <div style={{ color: '#c0392b', marginTop: 8 }}>Kennwort falsch</div>}
-        <button onClick={pruefen} style={gateBtn}>Anmelden</button>
+        {!auswahl && (
+          <>
+            <p style={{ color: '#666', marginTop: 0 }}>Wer bist du?</p>
+            {!personen && !fehler && <p style={{ color: '#999' }}>Lade …</p>}
+            <div style={gateNamen}>{team.map(knopf)}</div>
+            {verwaltung.length > 0 && (
+              <>
+                <p style={{ color: '#999', fontSize: '0.8rem', margin: '1rem 0 0.4rem' }}>Verwaltung</p>
+                <div style={gateNamen}>{verwaltung.map(knopf)}</div>
+              </>
+            )}
+          </>
+        )}
+        {auswahl && (
+          <>
+            <p style={{ color: '#666', marginTop: 0 }}>Hallo {auswahl.name}, bitte PIN eingeben</p>
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={6}
+              value={pin}
+              autoFocus
+              onChange={(e) => { setPin(e.target.value.replace(/\D/g, '')); setFehler(''); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') anmelden(); }}
+              style={{ ...gateInput, textAlign: 'center', letterSpacing: '0.4em', fontSize: '1.3rem' }}
+            />
+            <button onClick={anmelden} style={gateBtn} disabled={pruefend || pin.length < 4}>
+              {pruefend ? 'Prüfe …' : 'Anmelden'}
+            </button>
+            <button type="button" onClick={() => { setAuswahl(null); setPin(''); setFehler(''); }}
+              style={{ ...gateBtn, background: 'transparent', color: '#55725e', marginTop: 8 }}>
+              Andere Person
+            </button>
+          </>
+        )}
+        {fehler && <div style={{ color: '#c0392b', marginTop: 10 }}>{fehler}</div>}
       </div>
     </div>
   );
@@ -1985,6 +2103,12 @@ const gateInput = {
   width: '100%', padding: '0.7rem', fontSize: '1rem',
   border: '1px solid #ccc', borderRadius: 6, boxSizing: 'border-box',
 };
+const gateNamen = { display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' };
+const gateName = {
+  padding: '0.55rem 0.9rem', border: '1px solid #d8d2c6', borderRadius: 999,
+  background: '#fff', color: '#2c2a22', fontSize: '0.95rem', cursor: 'pointer',
+};
+const gateNameAktiv = { background: '#55725e', color: '#fff', borderColor: '#55725e' };
 const gateBtn = {
   marginTop: 16, width: '100%', padding: '0.7rem', background: '#55725e',
   color: '#fff', border: 'none', borderRadius: 6, fontSize: '1rem', cursor: 'pointer',

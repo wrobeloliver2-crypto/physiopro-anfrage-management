@@ -184,6 +184,12 @@ exports.handler = async (event) => {
     return jsonResponse(200, { success: true });
   }
 
+  // Sobald die Datenbank aktiv ist (DATABASE_URL gesetzt), ist dieser
+  // ungeschuetzte Sheet-Endpunkt abgeschaltet. Nachfolger: anfragen-api.
+  if (process.env.DATABASE_URL) {
+    return jsonResponse(410, { success: false, error: 'Abgeschaltet – Daten liegen jetzt in der Datenbank (anfragen-api)' });
+  }
+
   if (!SHEET_ID || !process.env.GOOGLE_SERVICE_ACCOUNT) {
     return jsonResponse(500, {
       success: false,

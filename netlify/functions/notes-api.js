@@ -4,6 +4,8 @@
 // Eigenes Google Sheet (separat vom Anfrage-Sheet)
 // ====================================================================
 const { google } = require('googleapis');
+const { zugriffPruefen, sitzungAus, CORS_HEADERS } = require('../lib/auth.cjs');
+const { dbAktiv, sql } = require('../lib/anfragen-db.cjs');
 
 // Eigenes Notizen-Sheet; ueber ENV ueberschreibbar
 const NOTES_SHEET_ID =
@@ -37,15 +39,51 @@ const jsonResponse = (statusCode, body) => ({
   statusCode,
   headers: {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    ...CORS_HEADERS,
   },
   body: JSON.stringify(body),
 });
 
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return jsonResponse(200, { success: true });
+
+  // Mit Datenbank (DATABASE_URL gesetzt): Zugriff nur mit Token, Notizen in Postgres.
+  if (dbAktiv()) {
+    const verweigert = zugriffPruefen(event);
+    if (verweigert) return verweigert;
+    try {
+      if (event.httpMethod === 'GET') {
+        const data = await sql().query('SELECT id, text, autor, zeit FROM uebergabe_notizen ORDER BY reihenfolge');
+        return jsonResponse(200, { success: true, data });
+      }
+      if (event.httpMethod === 'POST') {
+        if (sitzungAus(event).lesend) return jsonResponse(403, { success: false, error: 'Nur Lesezugriff' });
+        const payload = JSON.parse(event.body || '{}');
+        const notizen = (Array.isArray(payload.notizen) ? payload.notizen : [])
+          .filter((n) => n && n.id)
+          .map((n) => ({ id: String(n.id), text: String(n.text || ''), autor: String(n.autor || ''), zeit: String(n.zeit || '') }));
+        const db = sql();
+        await db.transaction([
+          db.query('DELETE FROM uebergabe_notizen WHERE NOT (id = ANY($1))', [notizen.map((n) => n.id)]),
+          db.query(
+            `INSERT INTO uebergabe_notizen (id, text, autor, zeit)
+             SELECT x.id, x.text, x.autor, x.zeit
+             FROM jsonb_array_elements($1::jsonb) WITH ORDINALITY AS e(obj, nr)
+         CROSS JOIN LATERAL jsonb_to_record(e.obj) AS x(id text, text text, autor text, zeit text)
+             ORDER BY e.nr
+             ON CONFLICT (id) DO UPDATE SET text = EXCLUDED.text, autor = EXCLUDED.autor, zeit = EXCLUDED.zeit`,
+            [JSON.stringify(notizen)]
+          ),
+        ]);
+        return jsonResponse(200, { success: true, message: notizen.length + ' notes updated' });
+      }
+      return jsonResponse(405, { success: false, error: 'Method not allowed' });
+    } catch (err) {
+      console.error('notes-api DB Fehler:', err);
+      return jsonResponse(500, { success: false, error: 'Datenbankfehler: ' + (err.message || 'unbekannt') });
+    }
+  }
+
   if (!process.env.GOOGLE_SERVICE_ACCOUNT) {
     return jsonResponse(500, { success: false, error: 'Server nicht konfiguriert' });
   }

@@ -14,6 +14,7 @@
 // Absicherung: Header x-api-key muss FLOW_API_KEY (Netlify-ENV) entsprechen.
 // ====================================================================
 const { google } = require('googleapis');
+const { dbAktiv, sql, anfragenSpeichern } = require('../lib/anfragen-db.cjs');
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const FLOW_API_KEY = process.env.FLOW_API_KEY;
@@ -204,7 +205,7 @@ exports.handler = async (event) => {
     return jsonResponse(401, { success: false, error: 'Unauthorized' });
   }
 
-  if (!SHEET_ID || !process.env.GOOGLE_SERVICE_ACCOUNT) {
+  if (!dbAktiv() && (!SHEET_ID || !process.env.GOOGLE_SERVICE_ACCOUNT)) {
     return jsonResponse(500, { success: false, error: 'Server nicht konfiguriert (Sheet/Service-Account fehlt)' });
   }
 
@@ -337,6 +338,23 @@ exports.handler = async (event) => {
     standort:     normStandort(payload.standort), // Z  (leer = Text-Fallback im Dashboard)
     klaerung:     '',    // AA leer (Rueckfragen entstehen erst im Dashboard)
   };
+
+  // ---- Datenbank (sobald DATABASE_URL gesetzt ist) ----
+  // Genau ein INSERT. Existiert die id schon (Flow #1 schickt dieselbe Mail
+  // erneut), wird NICHT ueberschrieben – sonst gingen Bearbeitungen verloren.
+  if (dbAktiv()) {
+    try {
+      const vorhanden = await sql().query('SELECT 1 FROM anfragen WHERE id = $1', [obj.id]);
+      if (vorhanden.length) {
+        return jsonResponse(200, { success: true, message: 'Bereits vorhanden', id: obj.id, telefon: obj.telefon, duplikat: true });
+      }
+      await anfragenSpeichern([{ ...obj, history: JSON.parse(historyStr), klaerung: null }], { historyErsetzen: true });
+      return jsonResponse(200, { success: true, message: 'Anfrage angelegt', id: obj.id, telefon: obj.telefon });
+    } catch (err) {
+      console.error('anfrage-create DB-Fehler:', err);
+      return jsonResponse(500, { success: false, error: 'Datenbankfehler: ' + (err.message || 'unknown') });
+    }
+  }
 
   const row = COLUMNS.map((k) => (obj[k] !== undefined && obj[k] !== null ? String(obj[k]) : ''));
 
