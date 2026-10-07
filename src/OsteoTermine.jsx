@@ -11,6 +11,22 @@ const CREATE_URL = BACKEND_BASE + '/.netlify/functions/osteo-create-appointment'
 const CANCEL_URL = BACKEND_BASE + '/.netlify/functions/osteo-cancel-appointment';
 const LIST_URL = BACKEND_BASE + '/.netlify/functions/osteo-list-appointments';
 
+// Anmeldung: dasselbe Token wie im restlichen Dashboard (siehe App.jsx).
+// Ohne gueltiges Token antworten die Osteo-Functions mit 401; dann wird
+// die Anmeldung erneut angezeigt.
+async function apiFetch(url, optionen = {}) {
+  const headers = { ...(optionen.headers || {}) };
+  let token = '';
+  try { token = sessionStorage.getItem('pp_token') || ''; } catch {}
+  if (token) headers.Authorization = 'Bearer ' + token;
+  const res = await fetch(url, { ...optionen, headers });
+  if (res.status === 401) {
+    try { sessionStorage.removeItem('pp_token'); } catch {}
+    window.dispatchEvent(new Event('pp-abgemeldet'));
+  }
+  return res;
+}
+
 const TYPES = [
   { key: 'osteo', title: 'Osteopathie', sub: '60 Minuten · 120 €' },
   { key: 'check', title: 'Osteopathie-Check', sub: '20 Minuten · 26,50 €' },
@@ -67,7 +83,7 @@ export default function OsteoTermine({ isReadOnly }) {
   const loadList = useCallback(async () => {
     setError('');
     try {
-      const r = await fetch(LIST_URL);
+      const r = await apiFetch(LIST_URL);
       const d = await r.json();
       if (!r.ok) { setError('Konnte Termine nicht laden.'); return; }
       setAppts(d.appointments || []);
@@ -146,7 +162,7 @@ function OsteoListe({ appts, loading, isReadOnly, onCancelled }) {
     setCancelBusy(true);
     setCancelError('');
     try {
-      const r = await fetch(CANCEL_URL, {
+      const r = await apiFetch(CANCEL_URL, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: cancelTarget.id }),
       });
@@ -289,7 +305,7 @@ function OsteoNeuerTermin({ allAppts, onCreated }) {
 
     setBusy(true);
     try {
-      const r = await fetch(CREATE_URL, {
+      const r = await apiFetch(CREATE_URL, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       });
