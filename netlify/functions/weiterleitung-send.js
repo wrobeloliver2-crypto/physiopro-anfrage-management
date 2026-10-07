@@ -26,7 +26,7 @@ const EMPFAENGER = {
   'Hanna Wrobel': 'hanna.wrobel@pilatescompany.de',
 };
 
-const { zugriffPruefen } = require('../lib/auth.cjs');
+const { zugriffPruefen, sitzungAus } = require('../lib/auth.cjs');
 
 const jsonResponse = (statusCode, body) => ({
   statusCode,
@@ -124,6 +124,7 @@ exports.handler = async (event) => {
   if (process.env.DASHBOARD_TOKEN_SECRET) {
     const verweigert = zugriffPruefen(event);
     if (verweigert) return verweigert;
+    if (sitzungAus(event).lesend) return jsonResponse(403, { ok: false, error: 'Nur Lesezugriff' });
   }
   if (event.httpMethod !== 'POST') return jsonResponse(405, { error: 'Method not allowed' });
 

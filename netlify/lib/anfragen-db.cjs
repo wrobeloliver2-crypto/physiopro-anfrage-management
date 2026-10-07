@@ -107,13 +107,24 @@ function eintragSchluessel(e) {
   ]);
 }
 
-function historyVereinen(alt, neu) {
+// autor: Name der angemeldeten Person. Neue Eintraege, die das Dashboard
+// mitschickt, bekommen serverseitig genau diesen Namen als "von" – so ist
+// der Verlauf belegbar und nicht frei waehlbar. "System"-Eintraege bleiben.
+function historyVereinen(alt, neu, autor) {
   const ergebnis = [];
   const gesehen = new Set();
-  for (const e of [...alsArray(alt), ...alsArray(neu)]) {
-    const k = eintragSchluessel(e);
+  const bekannt = new Set(alsArray(alt).map(eintragSchluessel));
+  for (const roh of [...alsArray(alt), ...alsArray(neu)]) {
+    const k = eintragSchluessel(roh);
     if (gesehen.has(k)) continue;
     gesehen.add(k);
+    let e = roh;
+    if (autor && !bekannt.has(k) && e && typeof e === 'object' && 'von' in e && e.von !== 'System') {
+      e = { ...e, von: autor };
+      const k2 = eintragSchluessel(e);
+      if (gesehen.has(k2)) continue;
+      gesehen.add(k2);
+    }
     ergebnis.push(e);
   }
   // Stabil nach Zeit sortieren; Eintraege ohne lesbare Zeit bleiben an ihrer Stelle relativ
@@ -146,7 +157,7 @@ async function anfragenSpeichern(liste, optionen = {}) {
     const bestehend = await db.query('SELECT id, history FROM anfragen WHERE id = ANY($1)', [ids]);
     const map = new Map(bestehend.map((r) => [r.id, r.history]));
     for (const z of zeilen) {
-      if (map.has(z.id)) z.history = historyVereinen(map.get(z.id), z.history);
+      z.history = historyVereinen(map.has(z.id) ? map.get(z.id) : [], z.history, optionen.autor);
     }
   }
 

@@ -4,7 +4,7 @@
 // Eigenes Google Sheet (separat vom Anfrage-Sheet)
 // ====================================================================
 const { google } = require('googleapis');
-const { zugriffPruefen, CORS_HEADERS } = require('../lib/auth.cjs');
+const { zugriffPruefen, sitzungAus, CORS_HEADERS } = require('../lib/auth.cjs');
 const { dbAktiv, sql } = require('../lib/anfragen-db.cjs');
 
 // Eigenes Notizen-Sheet; ueber ENV ueberschreibbar
@@ -57,6 +57,7 @@ exports.handler = async (event) => {
         return jsonResponse(200, { success: true, data });
       }
       if (event.httpMethod === 'POST') {
+        if (sitzungAus(event).lesend) return jsonResponse(403, { success: false, error: 'Nur Lesezugriff' });
         const payload = JSON.parse(event.body || '{}');
         const notizen = (Array.isArray(payload.notizen) ? payload.notizen : [])
           .filter((n) => n && n.id)
