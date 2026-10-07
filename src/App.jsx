@@ -244,6 +244,21 @@ function followupFaellig(a) {
 }
 const istHeute = (d) => d === heute();
 
+// ---- Wiederholte Anrufe (anfrage-create hängt Anrufe ohne Angaben an die
+// offene Karte derselben Nummer an: History-Eintrag „Weiterer Anruf") ----
+const ANRUF_QUELLEN = ['Telefon-Benachrichtigung', 'SMS-Rückrufwunsch'];
+const AKTION_WEITERER_ANRUF = 'Weiterer Anruf';
+function weitereAnrufe(a) {
+  return (Array.isArray(a && a.history) ? a.history : []).filter((e) => e && e.aktion === AKTION_WEITERER_ANRUF);
+}
+// Anzahl Anrufe, die in dieser Karte stecken (die Karte selbst zählt mit, wenn sie aus einem Anruf entstand)
+function anrufAnzahl(a) {
+  return (ANRUF_QUELLEN.includes(a && a.quelle) ? 1 : 0) + weitereAnrufe(a).length;
+}
+// Wer mehrfach anruft, ist dringend – auch wenn die Priorität beim
+// Speichern einer alten Kartenversion wieder überschrieben wurde.
+const prioEffektiv = (a) => (weitereAnrufe(a).length ? 'Sofort' : a.prioritaet);
+
 // Telefonnummer auf E.164 (+49...) normalisieren — fuer sauberen SMS-Versand
 function normalizeTelefon(roh) {
   if (!roh) return '';
@@ -976,8 +991,8 @@ function Dashboard() {
     .filter((a) => !['Erledigt','Weitergeleitet'].includes(a.status))
     .map((a, i) => [a, i])
     .sort(([a, ia], [b, ib]) => {
-      const ra = PRIO_RANG[a.prioritaet] ?? 1;
-      const rb = PRIO_RANG[b.prioritaet] ?? 1;
+      const ra = PRIO_RANG[prioEffektiv(a)] ?? 1;
+      const rb = PRIO_RANG[prioEffektiv(b)] ?? 1;
       return ra !== rb ? ra - rb : ia - ib;
     })
     .map(([a]) => a);
@@ -997,7 +1012,24 @@ function Dashboard() {
   };
   // Interne Nachrichten zählen nicht als Patientenanfragen
   const offeneCount = sichtbar.filter((a) => a.status==='Offen' && !istNachricht(a)).length;
-  const sofortCount = sichtbar.filter((a) => a.prioritaet==='Sofort' && !istNachricht(a)).length;
+  const sofortCount = sichtbar.filter((a) => prioEffektiv(a)==='Sofort' && !istNachricht(a)).length;
+  // Wie oft hat eine Nummer heute angerufen (über alle Karten, auch erledigte)?
+  // Für den Hinweis „Nummer hat heute schon X× angerufen" auf Karten mit Inhalt.
+  const anrufeHeute = useMemo(() => {
+    const m = new Map();
+    anfragen.forEach((a) => {
+      const tel = normalizeTelefon(a.telefon);
+      if (!tel || !istHeute(a.eingangsdatum)) return;
+      const n = anrufAnzahl(a);
+      if (n) m.set(tel, (m.get(tel) || 0) + n);
+    });
+    return m;
+  }, [anfragen]);
+  const andereAnrufeHeute = (a) => {
+    const tel = normalizeTelefon(a.telefon);
+    if (!tel) return 0;
+    return Math.max(0, (anrufeHeute.get(tel) || 0) - (istHeute(a.eingangsdatum) ? anrufAnzahl(a) : 0));
+  };
   const erledigtHeute = useMemo(() => anfragen.filter((a) => a.status==='Erledigt' && !istNachricht(a) && istHeute(a.eingangsdatum)).length, [anfragen]);
   const weitergeleitetHeute = useMemo(() => anfragen.filter((a) => a.status==='Weitergeleitet' && !istNachricht(a) && istHeute(a.eingangsdatum)).length, [anfragen]);
   // Nachrichten mit ungelesenem Beitrag für die angemeldete Person (auch erledigte
@@ -1068,18 +1100,18 @@ function Dashboard() {
               <div className="spalten-grid spalten-grid-4">
                 <StatusSpalte key="Offen-bs" status="Offen" standort={STANDORT_BS}
                   anfragen={sichtbarGefiltert.filter((a) => a.status==='Offen' && standortVon(a)===STANDORT_BS)}
-                  isReadOnly={isReadOnly} currentUser={currentUser} meId={meId} onCardClick={karteOeffnen}
+                  isReadOnly={isReadOnly} currentUser={currentUser} meId={meId} andereAnrufeHeute={andereAnrufeHeute} onCardClick={karteOeffnen}
                   onMove={cardMove} onSetSchritt={cardSetSchritt} onWeiterleiten={setWeiterleitenAnfrage}
                   onKlaerung={setKlaerungAnfrage} />
                 <StatusSpalte key="Offen-sto" status="Offen" standort={STANDORT_STO}
                   anfragen={sichtbarGefiltert.filter((a) => a.status==='Offen' && standortVon(a)===STANDORT_STO)}
-                  isReadOnly={isReadOnly} currentUser={currentUser} meId={meId} onCardClick={karteOeffnen}
+                  isReadOnly={isReadOnly} currentUser={currentUser} meId={meId} andereAnrufeHeute={andereAnrufeHeute} onCardClick={karteOeffnen}
                   onMove={cardMove} onSetSchritt={cardSetSchritt} onWeiterleiten={setWeiterleitenAnfrage}
                   onKlaerung={setKlaerungAnfrage} />
                 {SPALTEN.filter((status) => status !== 'Offen').map((status) => (
                   <StatusSpalte key={status} status={status}
                     anfragen={sichtbarGefiltert.filter((a) => a.status===status)}
-                    isReadOnly={isReadOnly} currentUser={currentUser} meId={meId} onCardClick={karteOeffnen}
+                    isReadOnly={isReadOnly} currentUser={currentUser} meId={meId} andereAnrufeHeute={andereAnrufeHeute} onCardClick={karteOeffnen}
                     onMove={cardMove} onSetSchritt={cardSetSchritt} onWeiterleiten={setWeiterleitenAnfrage}
                     onKlaerung={setKlaerungAnfrage} />
                 ))}
@@ -1200,7 +1232,7 @@ function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeut
 // ====================================================================
 // StatusSpalte (Box mit farbigem Kopf)
 // ====================================================================
-function StatusSpalte({ status, standort, anfragen, isReadOnly, currentUser, meId, onCardClick, onMove, onSetSchritt, onWeiterleiten, onKlaerung }) {
+function StatusSpalte({ status, standort, anfragen, isReadOnly, currentUser, meId, andereAnrufeHeute, onCardClick, onMove, onSetSchritt, onWeiterleiten, onKlaerung }) {
   const meta = SPALTEN_META[status];
   const istTodoSpalte = status === 'To Do';
   const [todoTab, setTodoTab] = useState(() => localStorage.getItem('todoSpalteTab') || 'todo');
@@ -1249,6 +1281,7 @@ function StatusSpalte({ status, standort, anfragen, isReadOnly, currentUser, meI
                 onClick={() => onCardClick(a)} onMove={onMove} />
             ) : (
               <AnfragenKarte key={a.id} anfrage={a} spalte={status} isReadOnly={isReadOnly}
+                andereAnrufe={andereAnrufeHeute ? andereAnrufeHeute(a) : 0}
                 onClick={() => onCardClick(a)} onMove={onMove} onSetSchritt={onSetSchritt}
                 onWeiterleiten={onWeiterleiten} onKlaerung={onKlaerung} />
             )
@@ -1263,9 +1296,14 @@ function StatusSpalte({ status, standort, anfragen, isReadOnly, currentUser, meI
 // ====================================================================
 // AnfragenKarte (mit Workflow-Buttons + Schritt-Etikett)
 // ====================================================================
-function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchritt, onWeiterleiten, onKlaerung }) {
+function AnfragenKarte({ anfrage, spalte, isReadOnly, andereAnrufe = 0, onClick, onMove, onSetSchritt, onWeiterleiten, onKlaerung }) {
   const [schrittOffen, setSchrittOffen] = useState(false);
-  const prio = PRIO_STYLE[anfrage.prioritaet] || PRIO_STYLE.Normal;
+  const prioWert = prioEffektiv(anfrage);
+  const prio = PRIO_STYLE[prioWert] || PRIO_STYLE.Normal;
+  // Mehrfach-Anrufe: weitere Anrufe ohne Angaben, die auf dieser Karte gelandet sind
+  const weitere = weitereAnrufe(anfrage);
+  const anrufe = anrufAnzahl(anfrage);
+  const letzterAnruf = weitere.length ? weitere[weitere.length - 1] : null;
   const istTodo = spalte==='To Do';
   const istBearb = spalte==='In Bearbeitung';
   const faellig = followupFaellig(anfrage);
@@ -1275,7 +1313,7 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
   // Anker nicht von heute ist) — eine seit gestern offene Sofort-Karte ist
   // erst recht überfällig.
   const sofortAnker = fristAnkerTS(anfrage);
-  const sofortUeberfaellig = anfrage.prioritaet === 'Sofort'
+  const sofortUeberfaellig = prioWert === 'Sofort'
     && !['Erledigt','Weitergeleitet','To Do'].includes(anfrage.status)
     && !!sofortAnker
     && (Date.now() - sofortAnker.getTime()) >= 60 * 60 * 1000;
@@ -1307,8 +1345,20 @@ function AnfragenKarte({ anfrage, spalte, isReadOnly, onClick, onMove, onSetSchr
       <div className="karte-kopf">
         <span className="karte-name">{anfrage.name}</span>
         {istTodo ? <AlertTriangle size={12} color="#b8742a" />
-          : <span className="karte-prio" style={{ color:prio.text, background:prio.bg }}>{anfrage.prioritaet}</span>}
+          : <span className="karte-prio" style={{ color:prio.text, background:prio.bg }}>{prioWert}</span>}
       </div>
+      {weitere.length > 0 && (
+        <div className="karte-mehrfach" title={'Anrufe: ' + weitere.map((e) => datumUhrzeit(e.zeitstempel)).join(', ')}>
+          <PhoneCall size={12} />
+          <span><strong>{anrufe}× angerufen</strong>{letzterAnruf ? ' · zuletzt ' + (istHeute(String(letzterAnruf.zeitstempel || '').slice(0, 10)) ? uhrzeit(letzterAnruf.zeitstempel) : datumUhrzeit(letzterAnruf.zeitstempel)) : ''}</span>
+        </div>
+      )}
+      {andereAnrufe > 0 && (
+        <div className="karte-mehrfach karte-mehrfach-hinweis">
+          <PhoneCall size={11} />
+          <span>Nummer hat heute schon {andereAnrufe}× angerufen</span>
+        </div>
+      )}
       <p className="karte-anliegen">{bereinigeAnliegen(anfrage.anliegen)}</p>
 
       {rfOffen && (
