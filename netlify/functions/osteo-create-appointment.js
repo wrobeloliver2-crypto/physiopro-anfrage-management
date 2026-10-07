@@ -1,8 +1,15 @@
 import { sheetAppend, sheetUpdateCell, sheetReadAll, COL } from './_osteo-lib.js';
 import { sendMail, confirmationHtml } from './_osteo-mail.js';
 import crypto from 'crypto';
+import auth from '../lib/auth.cjs';
 
 export const handler = async (event)=>{
+  // Nur aus dem angemeldeten Dashboard (Token aus dashboard-login)
+  const verweigert = auth.zugriffPruefen(event);
+  if (verweigert) return verweigert;
+  if (auth.sitzungAus(event).lesend) {
+    return { statusCode: 403, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Nur Lesezugriff' }) };
+  }
   if(event.httpMethod!=='POST') return resp(405,{error:'Method not allowed'});
 
   try{

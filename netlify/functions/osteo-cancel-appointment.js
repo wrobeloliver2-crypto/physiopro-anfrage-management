@@ -1,10 +1,17 @@
 import { sheetReadAll, sheetUpdateCell, COL, berlinLocalToUtcMs } from './_osteo-lib.js';
 import { sendMail, cancellationHtml } from './_osteo-mail.js';
+import auth from '../lib/auth.cjs';
 
 // Sagt einen Termin ab: bestimmt anhand der Berliner Zeit, ob rechtzeitig (>=24h,
 // kostenfrei) oder kurzfristig (<24h, Ausfallhonorar-Pruefung), schickt die passende
 // Absage-Mail und markiert den Termin im Sheet als storniert (loescht ihn nicht).
 export const handler = async (event)=>{
+  // Nur aus dem angemeldeten Dashboard (Token aus dashboard-login)
+  const verweigert = auth.zugriffPruefen(event);
+  if (verweigert) return verweigert;
+  if (auth.sitzungAus(event).lesend) {
+    return { statusCode: 403, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Nur Lesezugriff' }) };
+  }
   if(event.httpMethod!=='POST') return resp(405,{error:'Method not allowed'});
 
   try{

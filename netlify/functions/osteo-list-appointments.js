@@ -1,6 +1,10 @@
 import { sheetReadAll } from './_osteo-lib.js';
+import auth from '../lib/auth.cjs';
 
 export const handler = async (event)=>{
+  // Nur aus dem angemeldeten Dashboard (Token aus dashboard-login)
+  const verweigert = auth.zugriffPruefen(event);
+  if (verweigert) return verweigert;
   try{
     const all = await sheetReadAll();
     // Nur relevante Felder ans Frontend
