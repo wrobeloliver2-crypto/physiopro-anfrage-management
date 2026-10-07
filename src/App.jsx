@@ -30,6 +30,13 @@ const DRAFT_URL = BACKEND_BASE + '/.netlify/functions/draft-create';
 // Kennwort-Abfrage.
 // --------------------------------------------------------------------
 const TOKEN_KEY = 'pp_token';
+const USER_KEY = 'pp_user';
+function leseUser() { try { return JSON.parse(sessionStorage.getItem(USER_KEY) || 'null'); } catch { return null; } }
+function abmelden() {
+  try { sessionStorage.removeItem(USER_KEY); } catch {}
+  setzeToken('');
+  window.dispatchEvent(new Event(ABGEMELDET_EVENT));
+}
 const ABGEMELDET_EVENT = 'pp-abgemeldet';
 function leseToken() { try { return sessionStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; } }
 function setzeToken(t) { try { if (t) sessionStorage.setItem(TOKEN_KEY, t); else sessionStorage.removeItem(TOKEN_KEY); } catch {} }
@@ -58,7 +65,6 @@ const PRIORITAETEN = ['Sofort', 'Normal', 'Niedrig'];
 const BEARBEITER = ['Finn', 'Annika', 'Petra Drewitz', 'Vera Köhn', 'Antje Dreyer', 'Katy', 'Laura Klemme', 'Unzugewiesen'];
 const QUELLEN = ['Website', 'Telefon-Benachrichtigung', 'Manuell erfasst'];
 const READ_ONLY_USERS = ['Oliver Wrobel'];
-const ALLE_USER = ['Finn', 'Annika', 'Petra Drewitz', 'Vera Köhn', 'Antje Dreyer', 'Katy', 'Laura Klemme', 'Oliver Wrobel', 'Hanna Wrobel'];
 
 // Bearbeitungs-Schritte, getrennt nach aktiv (In Bearbeitung) / haengt (To Do)
 const SCHRITTE_AKTIV = ['Rückruf vereinbart', 'Prüfe Terminverfügbarkeit', 'Termin wird abgestimmt'];
@@ -465,7 +471,10 @@ function Dashboard() {
   const [anfragen, setAnfragen] = useState([]);
   const [notizen, setNotizen] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState(() => localStorage.getItem('currentUser') || 'Unzugewiesen');
+  // Angemeldete Person aus dem PIN-Login (Mitarbeiter-Datenbank). Kein
+  // freies Umschalten mehr: der Name steht automatisch im Kartenverlauf.
+  const angemeldet = leseUser() || {};
+  const currentUser = angemeldet.name || 'Unbekannt';
   const [showNewForm, setShowNewForm] = useState(false);
   const [selectedAnfrage, setSelectedAnfrage] = useState(null);
   const [weiterleitenAnfrage, setWeiterleitenAnfrage] = useState(null);
@@ -478,7 +487,7 @@ function Dashboard() {
   const [ansicht, setAnsicht] = useState('aktiv'); // 'aktiv' | 'muelleimer'
   const [suchbegriff, setSuchbegriff] = useState('');
 
-  const isReadOnly = READ_ONLY_USERS.includes(currentUser);
+  const isReadOnly = !!angemeldet.lesend || READ_ONLY_USERS.includes(currentUser);
 
   // Race-Condition-Schutz: Solange ein Speichervorgang (saveToSheets) noch läuft,
   // überschreibt ein zeitgleicher Auto-Refresh (loadFromSheets) NICHT den lokalen
@@ -495,7 +504,6 @@ function Dashboard() {
   const serverStand = useRef(new Map());
 
   useEffect(() => { loadFromSheets(); loadNotes(); /* eslint-disable-next-line */ }, []);
-  useEffect(() => { localStorage.setItem('currentUser', currentUser); }, [currentUser]);
   useEffect(() => {
     const t = setInterval(() => { loadFromSheets(); loadNotes(); }, 60000);
     return () => clearInterval(t); /* eslint-disable-next-line */
@@ -868,7 +876,7 @@ function Dashboard() {
           erledigtHeute={erledigtHeute} weitergeleitetHeute={weitergeleitetHeute}
           rueckfragenCount={rueckfragen.length}
           letzteAenderung={letzteAenderung} currentUser={currentUser}
-          setCurrentUser={setCurrentUser} isReadOnly={isReadOnly}
+          isReadOnly={isReadOnly}
           suchbegriff={suchbegriff} setSuchbegriff={setSuchbegriff}
           onNeu={() => setShowNewForm(true)} onRefresh={() => { loadFromSheets(); loadNotes(); }}
         />
@@ -965,7 +973,7 @@ function Dashboard() {
 // ====================================================================
 // Kopfzeile
 // ====================================================================
-function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeute, rueckfragenCount, letzteAenderung, currentUser, setCurrentUser, isReadOnly, suchbegriff, setSuchbegriff, onNeu, onRefresh }) {
+function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeute, rueckfragenCount, letzteAenderung, currentUser, isReadOnly, suchbegriff, setSuchbegriff, onNeu, onRefresh }) {
   const aenderungsZeit = letzteAenderung ? letzteAenderung.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}) : '—';
   return (
     <div className="kopfzeile">
@@ -996,9 +1004,10 @@ function Kopfzeile({ offeneCount, sofortCount, erledigtHeute, weitergeleitetHeut
       </div>
       <div className="kopf-rechts">
         <span className="kopf-stats">{offeneCount} offen{sofortCount>0 ? ' · '+sofortCount+' sofort' : ''}</span>
-        <select className="user-select" aria-label="Benutzer" value={currentUser} onChange={(e) => setCurrentUser(e.target.value)}>
-          {ALLE_USER.map((b) => <option key={b} value={b}>{b}</option>)}
-        </select>
+        <span className="user-select" title={isReadOnly ? 'Nur Lesezugriff' : 'Angemeldet'}>
+          <User size={13} /> {currentUser}{isReadOnly ? ' · nur lesen' : ''}
+        </span>
+        <button type="button" className="user-select" onClick={abmelden} title="Abmelden / Person wechseln">Abmelden</button>
         {!isReadOnly && <button className="neu-btn" onClick={onNeu}><Plus size={14} /> Neue Anfrage</button>}
       </div>
     </div>
@@ -1968,41 +1977,53 @@ function NeueAnfrageForm({ onClose, onSubmit, onMerge, checkDuplicate }) {
   );
 }
 
-// Anmeldung: Kennwort wird serverseitig geprüft (dashboard-login), das
-// zurückgegebene Token liegt im sessionStorage dieses Tabs (übersteht den
-// 60s-Auto-Refresh, gilt max. 14 Std). Wird ein Token abgelehnt (401),
-// meldet apiFetch das per Event und die Abfrage erscheint wieder.
+// Anmeldung pro Person: Name antippen, persönliche PIN eingeben (dieselbe
+// wie in der Zeiterfassung). Angezeigt werden nur Personen mit der Tätigkeit
+// „Rezeption" oder Admin-Rolle in der Mitarbeiter-Datenbank; die Prüfung
+// passiert zusätzlich serverseitig (dashboard-login). Token + Person liegen
+// im sessionStorage dieses Tabs (max. 12 Std); wird ein Token abgelehnt
+// (401), meldet apiFetch das per Event und der Anmeldebildschirm erscheint.
 function PasswortGate({ children }) {
-  const [frei, setFrei] = useState(() => !!leseToken());
-  const [eingabe, setEingabe] = useState('');
+  const [frei, setFrei] = useState(() => !!leseToken() && !!leseUser());
+  const [personen, setPersonen] = useState(null);
+  const [auswahl, setAuswahl] = useState(null);
+  const [pin, setPin] = useState('');
   const [fehler, setFehler] = useState('');
   const [pruefend, setPruefend] = useState(false);
 
   useEffect(() => {
-    const abmelden = () => setFrei(false);
-    window.addEventListener(ABGEMELDET_EVENT, abmelden);
-    return () => window.removeEventListener(ABGEMELDET_EVENT, abmelden);
+    const weg = () => { try { sessionStorage.removeItem(USER_KEY); } catch {} setFrei(false); setAuswahl(null); setPin(''); };
+    window.addEventListener(ABGEMELDET_EVENT, weg);
+    return () => window.removeEventListener(ABGEMELDET_EVENT, weg);
   }, []);
+
+  useEffect(() => {
+    if (frei || personen) return;
+    fetch(LOGIN_URL, { method: 'GET' })
+      .then((r) => r.json())
+      .then((d) => { if (d && Array.isArray(d.personen)) setPersonen(d.personen); else setFehler((d && d.error) || 'Liste nicht ladbar'); })
+      .catch(() => setFehler('Keine Verbindung'));
+  }, [frei, personen]);
 
   if (frei) return children;
 
-  const pruefen = async () => {
-    if (pruefend) return;
+  const anmelden = async () => {
+    if (pruefend || !auswahl) return;
     setPruefend(true); setFehler('');
     try {
       const res = await fetch(LOGIN_URL, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kennwort: eingabe }),
+        body: JSON.stringify({ userId: auswahl.id, pin }),
       });
       const data = await res.json().catch(() => ({}));
-      if (res.ok && data.token) {
+      if (res.ok && data.token && data.user) {
         setzeToken(data.token);
-        setEingabe('');
+        try { sessionStorage.setItem(USER_KEY, JSON.stringify(data.user)); } catch {}
+        setPin('');
         setFrei(true);
-      } else if (res.status === 401) {
-        setFehler('Kennwort falsch');
       } else {
-        setFehler((data && data.error) || 'Anmeldung gerade nicht möglich');
+        setFehler((data && data.error) || 'Anmeldung fehlgeschlagen');
+        setPin('');
       }
     } catch {
       setFehler('Keine Verbindung');
@@ -2011,25 +2032,60 @@ function PasswortGate({ children }) {
     }
   };
 
+  const team = (personen || []).filter((p) => !p.verwaltung);
+  const verwaltung = (personen || []).filter((p) => p.verwaltung);
+  const knopf = (p) => (
+    <button key={p.id} type="button" onClick={() => { setAuswahl(p); setPin(''); setFehler(''); }}
+      style={{ ...gateName, ...(auswahl && auswahl.id === p.id ? gateNameAktiv : {}) }}>
+      {p.name}
+    </button>
+  );
+
   return (
     <div style={gateWrap}>
-      <div style={gateBox}>
+      <div style={{ ...gateBox, width: 380 }}>
         <img
           src="/logo-physio.svg"
           alt="PhysioPro Lübeck"
           style={{ width: 150, height: 'auto', margin: '0 auto 1.25rem', display: 'block' }}
         />
-        <p style={{ color: '#666', marginTop: 0 }}>Bitte Kennwort eingeben</p>
-        <input
-          type="password"
-          value={eingabe}
-          autoFocus
-          onChange={(e) => { setEingabe(e.target.value); setFehler(''); }}
-          onKeyDown={(e) => { if (e.key === 'Enter') pruefen(); }}
-          style={gateInput}
-        />
-        {fehler && <div style={{ color: '#c0392b', marginTop: 8 }}>{fehler}</div>}
-        <button onClick={pruefen} style={gateBtn} disabled={pruefend}>{pruefend ? 'Prüfe …' : 'Anmelden'}</button>
+        {!auswahl && (
+          <>
+            <p style={{ color: '#666', marginTop: 0 }}>Wer bist du?</p>
+            {!personen && !fehler && <p style={{ color: '#999' }}>Lade …</p>}
+            <div style={gateNamen}>{team.map(knopf)}</div>
+            {verwaltung.length > 0 && (
+              <>
+                <p style={{ color: '#999', fontSize: '0.8rem', margin: '1rem 0 0.4rem' }}>Verwaltung</p>
+                <div style={gateNamen}>{verwaltung.map(knopf)}</div>
+              </>
+            )}
+          </>
+        )}
+        {auswahl && (
+          <>
+            <p style={{ color: '#666', marginTop: 0 }}>Hallo {auswahl.name}, bitte PIN eingeben</p>
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={6}
+              value={pin}
+              autoFocus
+              onChange={(e) => { setPin(e.target.value.replace(/\D/g, '')); setFehler(''); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') anmelden(); }}
+              style={{ ...gateInput, textAlign: 'center', letterSpacing: '0.4em', fontSize: '1.3rem' }}
+            />
+            <button onClick={anmelden} style={gateBtn} disabled={pruefend || pin.length < 4}>
+              {pruefend ? 'Prüfe …' : 'Anmelden'}
+            </button>
+            <button type="button" onClick={() => { setAuswahl(null); setPin(''); setFehler(''); }}
+              style={{ ...gateBtn, background: 'transparent', color: '#55725e', marginTop: 8 }}>
+              Andere Person
+            </button>
+          </>
+        )}
+        {fehler && <div style={{ color: '#c0392b', marginTop: 10 }}>{fehler}</div>}
       </div>
     </div>
   );
@@ -2047,6 +2103,12 @@ const gateInput = {
   width: '100%', padding: '0.7rem', fontSize: '1rem',
   border: '1px solid #ccc', borderRadius: 6, boxSizing: 'border-box',
 };
+const gateNamen = { display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' };
+const gateName = {
+  padding: '0.55rem 0.9rem', border: '1px solid #d8d2c6', borderRadius: 999,
+  background: '#fff', color: '#2c2a22', fontSize: '0.95rem', cursor: 'pointer',
+};
+const gateNameAktiv = { background: '#55725e', color: '#fff', borderColor: '#55725e' };
 const gateBtn = {
   marginTop: 16, width: '100%', padding: '0.7rem', background: '#55725e',
   color: '#fff', border: 'none', borderRadius: 6, fontSize: '1rem', cursor: 'pointer',
