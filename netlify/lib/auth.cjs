@@ -30,8 +30,10 @@ function kennwort() {
 // Personen, die alles sehen, aber nichts aendern duerfen (wie bisher READ_ONLY_USERS).
 // Abgleich ueber die feste id des Physio-Pro-Verhaeltnisses (mitarbeiter_firma.id),
 // nicht ueber den Namen – ein spaeter gesetzter Rufname aendert daran nichts.
-const NUR_LESEN_IDS = [34]; // Oliver Wrobel
-const NUR_LESEN = ['Oliver Wrobel']; // nur noch fuer die Anzeige im Frontend
+// Seit 07.10.2026 leer: Hanna (33) und Oliver (34) haben volle Rechte.
+// Mechanismus bleibt, falls spaeter wieder jemand nur lesen soll.
+const NUR_LESEN_IDS = [];
+const NUR_LESEN = []; // nur noch fuer die Anzeige im Frontend
 
 function b64url(buf) {
   return Buffer.from(buf).toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
