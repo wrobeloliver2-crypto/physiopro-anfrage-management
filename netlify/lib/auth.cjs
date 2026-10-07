@@ -1,23 +1,22 @@
 // ====================================================================
 // Zugangsschutz fuer die Dashboard-Functions
 // --------------------------------------------------------------------
-// Bisher war das Kennwort nur eine Sperre in der Oberflaeche
-// (VITE_DASHBOARD_PW, fest ins ausgelieferte JavaScript kompiliert).
-// Die Daten-Functions selbst waren ohne jeden Schutz erreichbar.
-//
-// Jetzt: Das Kennwort wird ausschliesslich serverseitig geprueft
-// (dashboard-login). Bei Erfolg gibt es ein signiertes Token mit
-// Ablaufzeit; jede Daten-Function verlangt es im Header
+// Anmeldung pro Person mit der PIN aus der Mitarbeiter-Datenbank
+// (dashboard-login). Zugelassen ist nur, wer dort die Taetigkeit
+// "Rezeption" hat oder Admin ist (View v_anfragen_zugang). Bei Erfolg
+// stellt das Dashboard ein eigenes, signiertes Token aus, das Name und
+// Rechte der Person enthaelt. Jede Daten-Function verlangt es im Header
 //   Authorization: Bearer <token>
 //
+// Ein Token aus einer anderen App (z. B. Zeiterfassung) gilt hier NICHT,
+// weil es mit einem anderen Geheimnis signiert ist.
+//
 // Env:
-//   DASHBOARD_PW            Kennwort (Fallback: VITE_DASHBOARD_PW, damit
-//                           der bestehende Wert weiter gilt)
 //   DASHBOARD_TOKEN_SECRET  Signier-Schluessel (lang, zufaellig)
 // ====================================================================
 const crypto = require('crypto');
 
-const GUELTIGKEIT_STUNDEN = 14; // ein Praxistag inkl. Puffer
+const GUELTIGKEIT_STUNDEN = 12; // wie der zentrale Mitarbeiter-Login
 
 function geheimnis() {
   return process.env.DASHBOARD_TOKEN_SECRET || '';
@@ -26,6 +25,9 @@ function geheimnis() {
 function kennwort() {
   return process.env.DASHBOARD_PW || process.env.VITE_DASHBOARD_PW || '';
 }
+
+// Personen, die alles sehen, aber nichts aendern duerfen (wie bisher READ_ONLY_USERS)
+const NUR_LESEN = ['Oliver Wrobel'];
 
 function b64url(buf) {
   return Buffer.from(buf).toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
@@ -41,21 +43,40 @@ function gleich(a, b) {
   return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
 }
 
-function tokenErstellen() {
-  const payload = b64url(JSON.stringify({ exp: Date.now() + GUELTIGKEIT_STUNDEN * 3600 * 1000 }));
+// person: { mf, name, rolle }  (rolle: 'admin' | 'mitarbeiter')
+function tokenErstellen(person = {}) {
+  const daten = {
+    exp: Date.now() + GUELTIGKEIT_STUNDEN * 3600 * 1000,
+    mf: person.mf || null,
+    name: person.name || '',
+    rolle: person.rolle || 'mitarbeiter',
+    lesend: NUR_LESEN.includes(person.name || ''),
+  };
+  const payload = b64url(JSON.stringify(daten));
   return payload + '.' + signatur(payload);
 }
 
-function tokenGueltig(token) {
-  if (!geheimnis() || !token || typeof token !== 'string') return false;
+// Liefert die Sitzungsdaten oder null
+function tokenLesen(token) {
+  if (!geheimnis() || !token || typeof token !== 'string') return null;
   const [payload, sig] = token.split('.');
-  if (!payload || !sig || !gleich(sig, signatur(payload))) return false;
+  if (!payload || !sig || !gleich(sig, signatur(payload))) return null;
   try {
     const daten = JSON.parse(Buffer.from(payload.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
-    return typeof daten.exp === 'number' && daten.exp > Date.now();
+    return typeof daten.exp === 'number' && daten.exp > Date.now() ? daten : null;
   } catch (e) {
-    return false;
+    return null;
   }
+}
+
+function tokenGueltig(token) {
+  return !!tokenLesen(token);
+}
+
+function sitzungAus(event) {
+  const h = (event && event.headers) || {};
+  const roh = h.authorization || h.Authorization || '';
+  return tokenLesen(roh.startsWith('Bearer ') ? roh.slice(7).trim() : '');
 }
 
 function kennwortRichtig(eingabe) {
@@ -71,10 +92,7 @@ const CORS_HEADERS = {
 
 // Liefert null, wenn der Aufruf berechtigt ist, sonst die fertige 401-Antwort.
 function zugriffPruefen(event) {
-  const h = event.headers || {};
-  const roh = h.authorization || h.Authorization || '';
-  const token = roh.startsWith('Bearer ') ? roh.slice(7).trim() : '';
-  if (tokenGueltig(token)) return null;
+  if (sitzungAus(event)) return null;
   return {
     statusCode: 401,
     headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
@@ -82,4 +100,4 @@ function zugriffPruefen(event) {
   };
 }
 
-module.exports = { tokenErstellen, tokenGueltig, kennwortRichtig, zugriffPruefen, CORS_HEADERS, geheimnis };
+module.exports = { tokenErstellen, tokenGueltig, tokenLesen, sitzungAus, kennwortRichtig, zugriffPruefen, CORS_HEADERS, geheimnis, NUR_LESEN };

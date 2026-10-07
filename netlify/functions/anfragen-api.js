@@ -15,7 +15,7 @@
 //
 // Zugriff nur mit gueltigem Token (dashboard-login).
 // ====================================================================
-const { zugriffPruefen, CORS_HEADERS } = require('../lib/auth.cjs');
+const { zugriffPruefen, sitzungAus, CORS_HEADERS } = require('../lib/auth.cjs');
 const { dbAktiv, anfragenLaden, anfragenSpeichern, anfragenLoeschen } = require('../lib/anfragen-db.cjs');
 
 const MAX_KARTEN_PRO_AUFRUF = 200;
@@ -39,6 +39,8 @@ exports.handler = async (event) => {
     }
 
     if (event.httpMethod === 'POST') {
+      const sitzung = sitzungAus(event);
+      if (sitzung.lesend) return antwort(403, { success: false, error: 'Nur Lesezugriff' });
       let payload;
       try { payload = JSON.parse(event.body || '{}'); } catch (e) { return antwort(400, { success: false, error: 'Ungültiges JSON' }); }
 
@@ -52,7 +54,7 @@ exports.handler = async (event) => {
       if (upsert.length > MAX_KARTEN_PRO_AUFRUF || loeschen.length > MAX_KARTEN_PRO_AUFRUF) {
         return antwort(413, { success: false, error: 'Zu viele Änderungen auf einmal' });
       }
-      const gespeichert = await anfragenSpeichern(upsert);
+      const gespeichert = await anfragenSpeichern(upsert, { autor: sitzung.name });
       const geloescht = await anfragenLoeschen(loeschen);
       return antwort(200, { success: true, gespeichert, geloescht });
     }

@@ -21,7 +21,7 @@
 // Reihenfolge, Zeile 1 = Header.
 // ====================================================================
 const { google } = require('googleapis');
-const { zugriffPruefen, CORS_HEADERS } = require('../lib/auth.cjs');
+const { zugriffPruefen, sitzungAus, CORS_HEADERS } = require('../lib/auth.cjs');
 const { dbAktiv, sql } = require('../lib/anfragen-db.cjs');
 
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
@@ -112,6 +112,7 @@ exports.handler = async (event) => {
   if (process.env.DASHBOARD_TOKEN_SECRET) {
     const verweigert = zugriffPruefen(event);
     if (verweigert) return verweigert;
+    if (sitzungAus(event).lesend) return jsonResponse(403, { success: false, error: 'Nur Lesezugriff' });
   }
   if (!dbAktiv() && (!SHEET_ID || !process.env.GOOGLE_SERVICE_ACCOUNT)) {
     return jsonResponse(500, {
@@ -132,13 +133,19 @@ exports.handler = async (event) => {
 
   const klaerung = saubereKlaerung(payload.klaerung);
   if (!klaerung) return jsonResponse(400, { success: false, error: 'klaerung unvollständig oder unzulässig' });
+  // Mit Anmeldung: Autor des neuesten Verlaufseintrags ist die angemeldete Person
+  const sitzungsName = (sitzungAus(event) || {}).name;
+  if (sitzungsName && klaerung.verlauf.length) {
+    klaerung.verlauf[klaerung.verlauf.length - 1].autor = sitzungsName;
+  }
 
   const histEintrag = payload.historyEintrag && typeof payload.historyEintrag === 'object'
     ? {
         zeitstempel: typeof payload.historyEintrag.zeitstempel === 'string'
           ? payload.historyEintrag.zeitstempel : new Date().toISOString(),
         aktion: String(payload.historyEintrag.aktion || 'Rückfrage').slice(0, 60),
-        von: String(payload.historyEintrag.von || '').slice(0, 120),
+        // Mit Anmeldung: Name aus der Sitzung, nicht aus dem Browser
+        von: String((sitzungAus(event) || {}).name || payload.historyEintrag.von || '').slice(0, 120),
         details: String(payload.historyEintrag.details || '').slice(0, MAX_TEXT),
       }
     : null;
