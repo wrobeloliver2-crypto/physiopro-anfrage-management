@@ -1,6 +1,7 @@
 import type { Context, Config } from "@netlify/functions";
 import { GoogleAuth } from "google-auth-library";
 import { google } from "googleapis";
+import { neon } from "@neondatabase/serverless";
 
 // Diese Function verwaltet die Dringlichkeits-Priorisierung eines
 // Anfrage-Eintrags im PhysioPro Google Sheet, ausgelöst über einen
@@ -133,7 +134,8 @@ export default async (req: Request, _context: Context) => {
       `<h1>Link unvollständig</h1><p>Bitte rufen Sie uns direkt an, falls es dringend ist.</p>`);
   }
 
-  if (!SHEET_ID || !SERVICE_ACCOUNT_JSON) {
+  const DATABASE_URL = process.env.DATABASE_URL;
+  if (!DATABASE_URL && (!SHEET_ID || !SERVICE_ACCOUNT_JSON)) {
     console.error("Missing GOOGLE_SHEET_ID or GOOGLE_SERVICE_ACCOUNT env vars");
     return pageShell("Technisches Problem", "Hinweis", "#a4453a",
       `<h1>Technisches Problem</h1><p>Ihre Anfrage konnte gerade nicht verarbeitet werden. Bitte rufen Sie uns direkt an.</p>`);
@@ -143,8 +145,55 @@ export default async (req: Request, _context: Context) => {
   const standortProvided = safeStandort.length > 0;
   const wantsBadSchwartau = /bad[-\s]?schwartau/i.test(safeStandort);
 
+  const okSeite = () => pageShell(
+    "Als dringend markiert",
+    "Erledigt",
+    "#4a6741",
+    `<h1>Danke, wir kümmern uns bevorzugt darum</h1><p>Ihr Anliegen wurde als dringend markiert. Annika und ihr Team melden sich schnellstmöglich bei Ihnen.</p>`
+  );
+  const nichtGefunden = () => pageShell("Kein Eintrag gefunden", "Hinweis", "#a4453a",
+    `<h1>Kein Eintrag gefunden</h1><p>Wir konnten Ihre Anfrage nicht automatisch finden. Bitte rufen Sie uns direkt an, wenn es dringend ist.</p>`);
+
+  // ---- Datenbank (sobald DATABASE_URL gesetzt ist) ----
+  // Gleiche Logik wie beim Sheet: neuester Eintrag mit passender Nummer,
+  // optional zuerst am angegebenen Standort. Standort-Erkennung: zuerst das
+  // explizite Feld, sonst wie bisher der Anliegen-Text.
+  if (DATABASE_URL) {
+    try {
+      const sql = neon(DATABASE_URL);
+      const zeilen = (await sql.query(
+        "SELECT id, telefon, anliegen, standort FROM anfragen ORDER BY reihenfolge"
+      )) as Array<{ id: string; telefon: string; anliegen: string; standort: string }>;
+      const istBS = (z: { anliegen: string; standort: string }) =>
+        z.standort ? z.standort === "bad-schwartau"
+          : (String(z.anliegen || "").includes("Standort: Bad Schwartau") || /bad\s+schwartau/i.test(String(z.anliegen || "")));
+      const finde = (mitStandort: boolean) => {
+        let treffer = "";
+        for (const z of zeilen) {
+          const tel = normalizePhone(String(z.telefon || ""));
+          if (!tel || tel !== targetPhone) continue;
+          if (mitStandort && istBS(z) !== wantsBadSchwartau) continue;
+          treffer = z.id;
+        }
+        return treffer;
+      };
+      const matchId = (standortProvided ? finde(true) : "") || finde(false);
+      if (!matchId) return nichtGefunden();
+      await sql.query(
+        "UPDATE anfragen SET prioritaet = 'Sofort', geaendert_am = now() WHERE id = $1",
+        [matchId]
+      );
+      console.log(`Priority set to Sofort for entry ${matchId} (DB)`);
+      return okSeite();
+    } catch (err) {
+      console.error("priority-update DB error:", err);
+      return pageShell("Technisches Problem", "Hinweis", "#a4453a",
+        `<h1>Technisches Problem</h1><p>Ihre Anfrage konnte gerade nicht verarbeitet werden. Bitte rufen Sie uns direkt an.</p>`);
+    }
+  }
+
   try {
-    const credentials = JSON.parse(SERVICE_ACCOUNT_JSON);
+    const credentials = JSON.parse(SERVICE_ACCOUNT_JSON as string);
     const auth = new GoogleAuth({
       credentials,
       scopes: ["https://www.googleapis.com/auth/spreadsheets"],
