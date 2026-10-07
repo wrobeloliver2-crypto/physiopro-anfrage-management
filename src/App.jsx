@@ -66,9 +66,10 @@ const NACHRICHT_URL = BACKEND_BASE + '/.netlify/functions/nachricht-api';
 const SPALTEN = ['Offen', 'In Bearbeitung', 'To Do'];
 const ALLE_STATUS = ['Offen', 'In Bearbeitung', 'To Do', 'Erledigt', 'Weitergeleitet'];
 const PRIORITAETEN = ['Sofort', 'Normal', 'Niedrig'];
-const BEARBEITER = ['Finn', 'Annika', 'Petra Drewitz', 'Vera Köhn', 'Antje Dreyer', 'Katy', 'Laura Klemme', 'Unzugewiesen'];
+const BEARBEITER = ['Finn', 'Annika', 'Petra Drewitz', 'Vera Köhn', 'Antje Dreyer', 'Katy', 'Laura Klemme', 'Hanna Wrobel', 'Oliver Wrobel', 'Unzugewiesen'];
 const QUELLEN = ['Website', 'Telefon-Benachrichtigung', 'Manuell erfasst'];
-const READ_ONLY_USERS = ['Oliver Wrobel'];
+// Seit 07.10.2026 leer: Hanna und Oliver haben volle Rechte (siehe auth.cjs NUR_LESEN_IDS)
+const READ_ONLY_USERS = [];
 
 // Bearbeitungs-Schritte, getrennt nach aktiv (In Bearbeitung) / haengt (To Do)
 const SCHRITTE_AKTIV = ['Rückruf vereinbart', 'Prüfe Terminverfügbarkeit', 'Termin wird abgestimmt'];
