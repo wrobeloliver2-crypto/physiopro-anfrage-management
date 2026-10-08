@@ -128,6 +128,14 @@ const ERGEBNIS_AUSFALLRECHNUNG = 'Terminabsage – kurzfristig (<24h, mit Ausfal
 // Diese Option verlangt beim Abschließen eine kurze Pflicht-Begründung,
 // die in die Notizen übernommen wird.
 const ERGEBNIS_BEGRUENDUNG_PFLICHT = 'Kein Interesse / zurückgezogen';
+// Kurzfristige Absage OHNE Ausfallrechnung: Verzicht muss begründet sein. Entweder
+// unterschreibt der Kunde beim nächsten Termin (Ausfallvereinbarung), oder es
+// wird eine kurze schriftliche Begründung erfasst. Beides landet in den Notizen
+// und in der History der Karte.
+const ERGEBNIS_OHNE_AUSFALLRECHNUNG = 'Terminabsage – kurzfristig (<24h, ohne Ausfallrechnung)';
+const TEXT_KUNDE_UNTERSCHREIBT = 'Kunde unterschreibt beim nächsten Mal';
+// Ergebnisse, bei denen die Notiz/Begründung in der Archiv-Ansicht gezeigt wird
+const zeigtBegruendung = (e) => e === ERGEBNIS_BEGRUENDUNG_PFLICHT || e === ERGEBNIS_OHNE_AUSFALLRECHNUNG;
 
 // Uhrzeit-Slots 08:00–18:00 in 30-Min-Schritten
 const ZEIT_SLOTS = (() => {
@@ -1789,7 +1797,7 @@ function Muelleimer({ anfragen, isReadOnly, onCardClick, onZurueckholen }) {
                 {bestaetigungGesendet(a) && (
                   <span className="muell-best-chip"><Mail size={11} /> Entwurf erstellt</span>
                 )}
-                {a.ergebnis === ERGEBNIS_BEGRUENDUNG_PFLICHT && a.notizen && a.notizen.trim() && (
+                {zeigtBegruendung(a.ergebnis) && a.notizen && a.notizen.trim() && (
                   <span className="muell-notiz"><FileText size={11} /> {a.notizen.trim()}</span>
                 )}
                 <span className="muell-meta">
@@ -2194,12 +2202,19 @@ function ErgebnisModal({ anfrage, onClose, onConfirm }) {
   const [auswahl, setAuswahl] = useState('');
   const [alleZeigen, setAlleZeigen] = useState(false);
   const [begruendung, setBegruendung] = useState('');
+  // Nur bei "ohne Ausfallrechnung": 'unterschrift' | 'begruendung' | ''
+  const [verzichtArt, setVerzichtArt] = useState('');
   const gruppen = alleZeigen ? ERGEBNIS_GRUPPEN : ERGEBNIS_GRUPPEN.slice(0, 2);
-  const brauchtBegruendung = auswahl === ERGEBNIS_BEGRUENDUNG_PFLICHT;
+  const istOhneAusfall = auswahl === ERGEBNIS_OHNE_AUSFALLRECHNUNG;
+  const brauchtBegruendung = auswahl === ERGEBNIS_BEGRUENDUNG_PFLICHT || (istOhneAusfall && verzichtArt === 'begruendung');
+  const verzichtOffen = istOhneAusfall && !verzichtArt;
   const begruendungFehlt = brauchtBegruendung && !begruendung.trim();
   const bestaetigen = () => {
-    if (!auswahl || begruendungFehlt) return;
-    onConfirm(anfrage, auswahl, brauchtBegruendung ? begruendung.trim() : '');
+    if (!auswahl || verzichtOffen || begruendungFehlt) return;
+    let text = '';
+    if (istOhneAusfall && verzichtArt === 'unterschrift') text = TEXT_KUNDE_UNTERSCHREIBT;
+    else if (brauchtBegruendung) text = begruendung.trim();
+    onConfirm(anfrage, auswahl, text);
   };
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -2218,7 +2233,7 @@ function ErgebnisModal({ anfrage, onClose, onConfirm }) {
                 {g.optionen.map((o) => (
                   <button key={o}
                     className={'erg-option'+(auswahl===o?' aktiv':'')+(g.primaer?' erg-primaer':'')}
-                    onClick={() => setAuswahl(o)}>
+                    onClick={() => { setAuswahl(o); if (o !== ERGEBNIS_OHNE_AUSFALLRECHNUNG) setVerzichtArt(''); }}>
                     {istTerminErgebnis(o) ? <CalendarCheck size={14} /> : istAbsage(o) ? <CalendarX size={14} /> : g.titel.startsWith('Kein') ? <Frown size={14} /> : <FileText size={14} />}
                     <span>{o}</span>
                     {NEUE_ERGEBNISSE.has(o) && <span className="erg-neu-chip">neu</span>}
@@ -2230,11 +2245,26 @@ function ErgebnisModal({ anfrage, onClose, onConfirm }) {
           {!alleZeigen && (
             <button className="erg-mehr" onClick={() => setAlleZeigen(true)}>… weitere Gründe</button>
           )}
+          {istOhneAusfall && (
+            <div className="erg-begruendung">
+              <label className="erg-begruendung-label">Warum keine Ausfallrechnung? (Pflicht)</label>
+              <div className="erg-optionen">
+                <button type="button" className={'erg-option'+(verzichtArt==='unterschrift'?' aktiv':'')}
+                  onClick={() => setVerzichtArt('unterschrift')}>
+                  <Check size={14} /><span>{TEXT_KUNDE_UNTERSCHREIBT}</span>
+                </button>
+                <button type="button" className={'erg-option'+(verzichtArt==='begruendung'?' aktiv':'')}
+                  onClick={() => setVerzichtArt('begruendung')}>
+                  <FileText size={14} /><span>Anderer Grund – kurze schriftliche Begründung</span>
+                </button>
+              </div>
+            </div>
+          )}
           {brauchtBegruendung && (
             <div className="erg-begruendung">
               <label className="erg-begruendung-label">Kurze Begründung (Pflicht)</label>
               <textarea className="erg-begruendung-feld" rows={2} autoFocus
-                placeholder="z. B. anderer Anbieter gewählt, Beschwerden abgeklungen …"
+                placeholder={istOhneAusfall ? 'z. B. Krankenhausaufenthalt, Kulanz wegen Todesfall …' : 'z. B. anderer Anbieter gewählt, Beschwerden abgeklungen …'}
                 value={begruendung} onChange={(e) => setBegruendung(e.target.value)} />
               <p className="erg-begruendung-hinweis">Wird in die Notizen übernommen.</p>
             </div>
@@ -2242,11 +2272,12 @@ function ErgebnisModal({ anfrage, onClose, onConfirm }) {
         </div>
         <div className="modal-fuss">
           <button className="abbrechen-btn" onClick={onClose}>Abbrechen</button>
-          <button className="speichern-btn" disabled={!auswahl || begruendungFehlt} onClick={bestaetigen}>
+          <button className="speichern-btn" disabled={!auswahl || verzichtOffen || begruendungFehlt} onClick={bestaetigen}>
             Erledigt
           </button>
         </div>
         {!auswahl && <p className="erg-hinweis">Ohne Auswahl nicht möglich</p>}
+        {verzichtOffen && <p className="erg-hinweis">Bitte angeben, warum keine Ausfallrechnung gestellt wird</p>}
         {begruendungFehlt && <p className="erg-hinweis">Begründung erforderlich</p>}
       </div>
     </div>
