@@ -8,6 +8,7 @@ import {
   MessageSquare, HelpCircle, CornerUpLeft, MessagesSquare, Users,
 } from 'lucide-react';
 import OsteoTermine from './OsteoTermine';
+import { darfNachrichtSchliessen, schliessenHinweisFuerAbsender } from './nachrichtRegeln.js';
 import './rueckfrage.css';
 import './nachricht.css';
 
@@ -474,7 +475,9 @@ function wartedauerLabel(min) {
 
 // ---- Interne Nachrichten (Spalte `nachricht`) ----
 // Datenform: { von:{id,name}, an:{typ:'person',id,name} | {typ:'standort',standort,name},
-//              verlauf:[{zeit,autorId,autor,text}], gelesen:{ <personId>: iso } }
+//              verlauf:[{zeit,autorId,autor,text}], gelesen:{ <personId>: iso },
+//              geschlossen:{von:{id,name},zeit}, quittiert:{ <personId>: iso } }
+// geschlossen/quittiert setzt ausschließlich nachricht-api (Aktionen schliessen/quittieren).
 // Die Karte selbst ist eine normale Board-Karte (Quelle „Interne Nachricht"),
 // zählt aber nicht als Patientenanfrage (Zähler, Ergebnis-Popup).
 const QUELLE_NACHRICHT = 'Interne Nachricht';
@@ -487,6 +490,8 @@ function nachrichtVon(a) {
     an: n.an,
     verlauf: Array.isArray(n.verlauf) ? n.verlauf : [],
     gelesen: n.gelesen && typeof n.gelesen === 'object' ? n.gelesen : {},
+    geschlossen: n.geschlossen && typeof n.geschlossen === 'object' ? n.geschlossen : null,
+    quittiert: n.quittiert && typeof n.quittiert === 'object' ? n.quittiert : {},
   };
 }
 const istNachricht = (a) => !!a && (a.quelle === QUELLE_NACHRICHT || !!nachrichtVon(a));
@@ -508,13 +513,23 @@ function nachrichtUngelesen(a, meId) {
   const gelesen = n.gelesen[meId];
   return !gelesen || String(gelesen) < String(letzter.zeit || '');
 }
-const nachrichtFuerMich = (a, meId) => nachrichtBetrifft(a, meId) && nachrichtUngelesen(a, meId);
+// Hat jemand anderes als ich (Absender) meine erledigte Nachricht geschlossen und ich habe
+// das noch nicht mit „Zur Kenntnis" bestätigt? -> { von:{id,name}, zeit } oder null
+function nachrichtZurKenntnis(a, meId) {
+  if (!a || a.status !== 'Erledigt' || !a.nachricht) return null;
+  return schliessenHinweisFuerAbsender(a.nachricht, meId);
+}
+// Darf die angemeldete Person diese Nachricht schließen? (Regel: nachrichtRegeln.js)
+const nachrichtSchliessenDarf = (a, meId) => darfNachrichtSchliessen(a && a.nachricht, meId);
+// „Für mich": neuer Beitrag von anderen ODER eine von jemand anderem geschlossene
+// Nachricht, die ich noch nicht zur Kenntnis genommen habe.
+const nachrichtFuerMich = (a, meId) => nachrichtBetrifft(a, meId) && (nachrichtUngelesen(a, meId) || !!nachrichtZurKenntnis(a, meId));
 // Schlüssel für „weggeklickt": Karte + Zeitpunkt des letzten Beitrags. Kommt ein
 // neuer Beitrag, ändert sich der Schlüssel und das Hinweisfenster erscheint erneut.
 function nachrichtPopupSchluessel(a) {
   const n = nachrichtVon(a);
   const letzter = n && n.verlauf.length ? n.verlauf[n.verlauf.length - 1] : null;
-  return String(a.id) + '|' + (letzter ? letzter.zeit : '');
+  return String(a.id) + '|' + (letzter ? letzter.zeit : '') + (n && n.geschlossen ? '|zu:' + (n.geschlossen.zeit || '') : '');
 }
 // Gehört diese Nachricht ins Hinweisfenster?
 //  - alles, was die Person direkt betrifft und ungelesen ist (an mich, Antwort auf meine)
@@ -732,8 +747,10 @@ function Dashboard() {
   // Karten-Aktionen (Workflow-Buttons)
   const cardMove = (anfrage, neuerStatus) => {
     if (neuerStatus === 'Erledigt' && istNachricht(anfrage)) {
-      // Interne Nachricht: kein Ergebnis-Popup, keine Terminbestätigung
-      cardErledigt(anfrage, ERGEBNIS_NACHRICHT); return;
+      // Interne Nachricht: nie über persist() (der Server setzt Erledigt dort nicht mehr
+      // durch), sondern über nachricht-api 'schliessen' mit Berechtigung und Protokoll.
+      nachrichtSchliessen(anfrage).catch((e) => setError(e.message || 'Nachricht konnte nicht geschlossen werden'));
+      return;
     }
     if (neuerStatus === 'Erledigt') {
       // Ergebnis bereits gesetzt (z.B. Ausfallrechnung-Fall): direkt abschließen, kein Popup.
@@ -966,10 +983,35 @@ function Dashboard() {
     nachrichtLokal(anfrage.id, (a) => {
       const n = nachrichtVon(a);
       if (!n) return a;
-      return { ...a, nachricht: { ...a.nachricht, verlauf: [...n.verlauf, eintrag], gelesen: { ...n.gelesen, [meId]: eintrag.zeit } } };
+      // Eine Antwort öffnet eine erledigte Karte wieder (wie auf dem Server): geschlossen/quittiert entfallen
+      const { geschlossen: _g, quittiert: _q, ...rest } = a.nachricht;
+      return { ...a, status: a.status === 'Erledigt' ? 'Offen' : a.status, ergebnis: a.status === 'Erledigt' ? '' : a.ergebnis,
+        nachricht: { ...rest, verlauf: [...n.verlauf, eintrag], gelesen: { ...n.gelesen, [meId]: eintrag.zeit } } };
     });
     setLetzteAenderung(new Date());
     loadFromSheets();
+  };
+  // Schließen: Berechtigung prüft der Server (hier zusätzlich vorab, für die Meldung).
+  // Wirft bei Fehler – NachrichtModal zeigt die Meldung, das Board setError().
+  const nachrichtSchliessen = async (anfrage) => {
+    const darf = nachrichtSchliessenDarf(anfrage, meId);
+    if (!darf.erlaubt) throw new Error(darf.grund);
+    const r = await nachrichtAufruf({ aktion: 'schliessen', id: anfrage.id });
+    const zeit = (r.geschlossen && r.geschlossen.zeit) || jetztISO();
+    nachrichtLokal(anfrage.id, (a) => ({
+      ...a, status: 'Erledigt', ergebnis: ERGEBNIS_NACHRICHT,
+      nachricht: { ...a.nachricht, geschlossen: r.geschlossen || { von: { id: meId, name: currentUser }, zeit }, quittiert: r.quittiert || {} },
+      history: [...(a.history || []), { zeitstempel: zeit, aktion: 'Status', von: currentUser, details: 'Erledigt (Nachricht geschlossen von ' + currentUser + ')' }],
+    }));
+    setLetzteAenderung(new Date());
+    loadFromSheets();
+  };
+  // Absender bestätigt „Zur Kenntnis genommen" (auch im Nur-Lese-Zugang erlaubt)
+  const nachrichtQuittieren = async (anfrage) => {
+    const zeit = jetztISO();
+    await nachrichtAufruf({ aktion: 'quittieren', id: anfrage.id });
+    nachrichtLokal(anfrage.id, (a) => ({ ...a, nachricht: { ...a.nachricht, quittiert: { ...(a.nachricht.quittiert || {}), [meId]: zeit } } }));
+    setLetzteAenderung(new Date());
   };
   const nachrichtGelesen = (anfrage) => {
     if (!nachrichtUngelesen(anfrage, meId)) return;
@@ -1042,11 +1084,15 @@ function Dashboard() {
   const weitergeleitetHeute = useMemo(() => anfragen.filter((a) => a.status==='Weitergeleitet' && !istNachricht(a) && istHeute(a.eingangsdatum)).length, [anfragen]);
   // Nachrichten mit ungelesenem Beitrag für die angemeldete Person (auch erledigte
   // nicht, die tauchen erst durch eine neue Antwort wieder auf)
-  const fuerMich = sichtbar.filter((a) => nachrichtFuerMich(a, meId));
+  // Zusätzlich: von anderen als erledigt markierte Nachrichten, die ich als Absender noch
+  // nicht zur Kenntnis genommen habe – sie sind erledigt (nicht im Board) und müssen
+  // trotzdem sichtbar bleiben, auch wenn sie schon aus dem 14-Tage-Archiv gefallen sind.
+  const kenntnisOffen = anfragen.filter((a) => nachrichtZurKenntnis(a, meId));
+  const fuerMich = [...sichtbar.filter((a) => nachrichtFuerMich(a, meId)), ...kenntnisOffen];
   // Hinweisfenster: neue Nachrichten, die hier noch nicht weggeklickt wurden
   let meinStandort = '';
   try { meinStandort = normStandort(localStorage.getItem('standortDefault')); } catch {}
-  const popupNachrichten = sichtbar
+  const popupNachrichten = [...sichtbar, ...kenntnisOffen]
     .filter((a) => nachrichtFuerPopup(a, meId, meinStandort))
     .filter((a) => !weggeklickt.has(nachrichtPopupSchluessel(a)));
   // Offene/beantwortete Standort-Rückfragen (nur auf noch aktiven Karten).
@@ -1103,7 +1149,7 @@ function Dashboard() {
             <div className="lade-zustand"><div className="spinner" /><span>Daten laden…</span></div>
           ) : ansicht==='aktiv' ? (
             <>
-              <NachrichtenLeiste anfragen={fuerMich} onOeffnen={setNachrichtAnfrage} />
+              <NachrichtenLeiste anfragen={fuerMich} meId={meId} onOeffnen={setNachrichtAnfrage} onKenntnis={nachrichtQuittieren} />
               <RueckfragenLeiste anfragen={rueckfragen} onOeffnen={setKlaerungAnfrage} />
               <div className="spalten-grid spalten-grid-4">
                 <StatusSpalte key="Offen-bs" status="Offen" standort={STANDORT_BS}
@@ -1126,7 +1172,7 @@ function Dashboard() {
               </div>
             </>
           ) : (
-            <Muelleimer anfragen={muelleimerGefiltert} isReadOnly={isReadOnly}
+            <Muelleimer anfragen={muelleimerGefiltert} isReadOnly={isReadOnly} meId={meId}
               onCardClick={karteOeffnen} onZurueckholen={zurueckholen} />
           )}
           <UebergabeNotizen notizen={notizen} isReadOnly={isReadOnly} onAdd={addNotiz} onDelete={deleteNotiz} />
@@ -1152,13 +1198,15 @@ function Dashboard() {
         {nachrichtLive && (
           <NachrichtModal anfrage={nachrichtLive} meId={meId} isReadOnly={isReadOnly}
             onOeffnet={nachrichtGelesen}
+            onKenntnis={() => nachrichtQuittieren(nachrichtLive)}
             onClose={() => setNachrichtAnfrage(null)}
             onAntworten={(text) => nachrichtAntworten(nachrichtLive, text)}
-            onErledigt={() => { cardMove(nachrichtLive, 'Erledigt'); setNachrichtAnfrage(null); }} />
+            onErledigt={async () => { await nachrichtSchliessen(nachrichtLive); setNachrichtAnfrage(null); }} />
         )}
         {popupNachrichten.length > 0 && !nachrichtLive && (
           <NachrichtPopup anfragen={popupNachrichten} meId={meId}
             onOeffnen={(a) => { popupWegklicken([a]); setNachrichtAnfrage(a); }}
+            onKenntnis={(a) => nachrichtQuittieren(a).catch((e) => setError('Bestätigung konnte nicht gespeichert werden (' + (e.message || 'Netzwerkfehler') + ')'))}
             onWeg={() => popupWegklicken(popupNachrichten)} />
         )}
         {nachrichtNeu && !isReadOnly && (
@@ -1474,6 +1522,8 @@ function NachrichtKarte({ anfrage, spalte, isReadOnly, meId, onClick, onMove }) 
   const letzter = n && n.verlauf.length ? n.verlauf[n.verlauf.length - 1] : null;
   const neu = nachrichtUngelesen(anfrage, meId) && (nachrichtBetrifft(anfrage, meId) || (n && n.an.typ === 'standort'));
   const anMich = !!n && n.an.typ === 'person' && String(n.an.id) === meId;
+  const darf = nachrichtSchliessenDarf(anfrage, meId);
+  const gesperrt = !!n && !darf.erlaubt;
   const stop = (e, fn) => { e.stopPropagation(); fn(); };
   return (
     <div className={'karte karte-nachricht' + (neu ? ' nm-ungelesen' : '')} onClick={onClick}>
@@ -1499,6 +1549,9 @@ function NachrichtKarte({ anfrage, spalte, isReadOnly, meId, onClick, onMove }) 
       <div className="karte-meta">
         <span className="karte-zeit"><Clock size={12} /> {letzter ? datumUhrzeit(letzter.zeit) : eingangLabel(anfrage)}</span>
       </div>
+      {gesperrt && darf.wartetAuf && (
+        <div className="nm-wartet" title={darf.grund}><Hourglass size={11} /> Wartet auf {darf.wartetAuf}</div>
+      )}
       {!isReadOnly && (
         <div className="karte-aktionen" onClick={(e) => e.stopPropagation()}>
           {spalte === 'Offen' && (
@@ -1508,7 +1561,9 @@ function NachrichtKarte({ anfrage, spalte, isReadOnly, meId, onClick, onMove }) 
             <button className="akt-grau" title="Zurück" onClick={(e) => stop(e, () => onMove(anfrage, spalte === 'To Do' ? 'In Bearbeitung' : 'Offen'))}><ArrowLeft size={12} /></button>
           )}
           <button className="akt-nm" title="Antworten" onClick={(e) => stop(e, onClick)}><CornerUpLeft size={12} /></button>
-          <button className="akt-fertig" title="Erledigt" onClick={(e) => stop(e, () => onMove(anfrage, 'Erledigt'))}><Check size={12} /></button>
+          <button className="akt-fertig" disabled={gesperrt}
+            title={gesperrt ? darf.grund + ' – du kannst die Nachricht erst schließen, wenn er/sie geantwortet hat.' : 'Erledigt'}
+            onClick={(e) => stop(e, () => onMove(anfrage, 'Erledigt'))}><Check size={12} /></button>
         </div>
       )}
     </div>
@@ -1516,7 +1571,7 @@ function NachrichtKarte({ anfrage, spalte, isReadOnly, meId, onClick, onMove }) 
 }
 
 // Leiste über dem Board: Nachrichten mit neuem Beitrag für die angemeldete Person
-function NachrichtenLeiste({ anfragen, onOeffnen }) {
+function NachrichtenLeiste({ anfragen, meId, onOeffnen, onKenntnis }) {
   if (!anfragen.length) return null;
   return (
     <div className="nm-leiste">
@@ -1526,6 +1581,17 @@ function NachrichtenLeiste({ anfragen, onOeffnen }) {
           const n = nachrichtVon(a);
           if (!n) return null;
           const letzter = n.verlauf[n.verlauf.length - 1];
+          const kenntnis = nachrichtZurKenntnis(a, meId);
+          if (kenntnis) {
+            return (
+              <div key={a.id} className="rf-zeile nm-zeile nm-zeile-kenntnis">
+                <span className="rf-zeile-name">{kenntnis.von.name} hat „{a.name || '(ohne Betreff)'}" als erledigt markiert</span>
+                <span className="rf-zeile-text">{letzter ? letzter.text : ''}</span>
+                <button type="button" className="nm-btn-klein" onClick={() => onOeffnen(a)}>Öffnen</button>
+                <button type="button" className="nm-btn-klein nm-btn-kenntnis" onClick={() => onKenntnis && onKenntnis(a)}><Check size={12} /> Zur Kenntnis</button>
+              </div>
+            );
+          }
           return (
             <button key={a.id} type="button" className="rf-zeile nm-zeile" onClick={() => onOeffnen(a)}>
               <span className="rf-zeile-name">{a.name || '(ohne Betreff)'}</span>
@@ -1542,18 +1608,35 @@ function NachrichtenLeiste({ anfragen, onOeffnen }) {
 
 // Hinweisfenster vorne im Bildschirm: „Sie haben 1 neue Nachricht".
 // Schließt sich nicht durch Klick daneben – nur über „Öffnen" oder „Später ansehen".
-function NachrichtPopup({ anfragen, meId, onOeffnen, onWeg }) {
+function NachrichtPopup({ anfragen, meId, onOeffnen, onKenntnis, onWeg }) {
   const anzahl = anfragen.length;
+  const hatKenntnis = anfragen.some((a) => nachrichtZurKenntnis(a, meId));
   return (
     <div className="nm-popup-overlay" role="alertdialog" aria-modal="true" aria-labelledby="nm-popup-titel">
       <div className="modal modal-schmal nm-popup">
         <div className="modal-kopf modal-kopf-nm">
-          <h2 id="nm-popup-titel"><Mail size={18} /> Sie haben {anzahl === 1 ? '1 neue Nachricht' : anzahl + ' neue Nachrichten'}</h2>
+          <h2 id="nm-popup-titel"><Mail size={18} /> Sie haben {hatKenntnis ? (anzahl === 1 ? '1 neuen Hinweis' : anzahl + ' neue Hinweise') : (anzahl === 1 ? '1 neue Nachricht' : anzahl + ' neue Nachrichten')}</h2>
         </div>
         <div className="modal-body">
           {anfragen.slice(0, 5).map((a) => {
             const n = nachrichtVon(a);
             const letzter = n.verlauf[n.verlauf.length - 1];
+            const kenntnis = nachrichtZurKenntnis(a, meId);
+            if (kenntnis) {
+              return (
+                <div key={a.id} className="nm-popup-eintrag nm-popup-kenntnis">
+                  <span className="nm-popup-kopf">
+                    <strong>{kenntnis.von.name}</strong>&nbsp;hat „{a.name || '(ohne Betreff)'}" als erledigt markiert
+                    {kenntnis.zeit ? ' · ' + uhrzeit(kenntnis.zeit) : ''}
+                  </span>
+                  <span className="nm-popup-text">{letzter ? (letzter.autor ? letzter.autor + ': ' : '') + letzter.text : a.anliegen}</span>
+                  <span className="nm-popup-aktionen">
+                    <button type="button" className="nm-btn-klein" onClick={() => onOeffnen(a)}>Öffnen</button>
+                    <button type="button" className="nm-btn-klein nm-btn-kenntnis" onClick={() => onKenntnis && onKenntnis(a)}><Check size={12} /> Zur Kenntnis</button>
+                  </span>
+                </div>
+              );
+            }
             const istAntwort = n.verlauf.length > 1;
             const anStandort = n.an.typ === 'standort' && !istAntwort;
             return (
@@ -1679,7 +1762,7 @@ function NachrichtNeuModal({ personen, onClose, onSenden }) {
 }
 
 // Verlauf einer Nachricht ansehen, antworten, erledigen
-function NachrichtModal({ anfrage, meId, isReadOnly, onOeffnet, onClose, onAntworten, onErledigt }) {
+function NachrichtModal({ anfrage, meId, isReadOnly, onOeffnet, onKenntnis, onClose, onAntworten, onErledigt }) {
   const n = nachrichtVon(anfrage);
   const [text, setText] = useState('');
   const [sendet, setSendet] = useState(false);
@@ -1690,6 +1773,19 @@ function NachrichtModal({ anfrage, meId, isReadOnly, onOeffnet, onClose, onAntwo
   useEffect(() => { onOeffnet && onOeffnet(anfrage); /* eslint-disable-next-line */ }, [anfrage.id, anzahl]);
   useEffect(() => { if (verlaufRef.current) verlaufRef.current.scrollTop = verlaufRef.current.scrollHeight; }, [anzahl]);
   const erledigt = anfrage.status === 'Erledigt';
+  const darf = darfNachrichtSchliessen(anfrage.nachricht, meId);
+  const gesperrt = !!n && !darf.erlaubt;
+  const kenntnis = nachrichtZurKenntnis(anfrage, meId);
+  const schliessen = async () => {
+    setFehler('');
+    try { await onErledigt(); }
+    catch (e) { setFehler(e.message || 'Nachricht konnte nicht geschlossen werden'); }
+  };
+  const zurKenntnis = async () => {
+    setFehler('');
+    try { await onKenntnis(); }
+    catch (e) { setFehler('Bestätigung konnte nicht gespeichert werden (' + (e.message || 'Netzwerkfehler') + ')'); }
+  };
 
   const antworten = async () => {
     if (!text.trim() || sendet) return;
@@ -1718,6 +1814,15 @@ function NachrichtModal({ anfrage, meId, isReadOnly, onOeffnet, onClose, onAntwo
           ) : (
             <p className="rf-hinweis">Verlauf nicht verfügbar.</p>
           )}
+          {kenntnis && (
+            <div className="nm-hinweis-box">
+              <span><strong>{kenntnis.von.name}</strong> hat diese Nachricht als erledigt markiert{kenntnis.zeit ? ' (' + datumUhrzeit(kenntnis.zeit) + ')' : ''}. Eine neue Antwort öffnet sie wieder.</span>
+              <button type="button" className="nm-btn-klein nm-btn-kenntnis" onClick={zurKenntnis}><Check size={12} /> Zur Kenntnis</button>
+            </div>
+          )}
+          {n && n.geschlossen && !kenntnis && erledigt && (
+            <p className="rf-hinweis">Geschlossen von {n.geschlossen.von && n.geschlossen.von.name}{n.geschlossen.zeit ? ' · ' + datumUhrzeit(n.geschlossen.zeit) : ''}</p>
+          )}
           {n && (
             <div className="rf-verlauf nm-verlauf" ref={verlaufRef}>
               {n.verlauf.map((e, i) => {
@@ -1738,6 +1843,9 @@ function NachrichtModal({ anfrage, meId, isReadOnly, onOeffnet, onClose, onAntwo
             </div>
           )}
           {isReadOnly && <p className="rf-hinweis">Nur-Lese-Zugriff: Nachrichten können hier nicht beantwortet werden.</p>}
+          {!isReadOnly && n && !erledigt && gesperrt && (
+            <p className="nm-wartet nm-wartet-modal"><Hourglass size={12} /> {darf.grund}. Du kannst die Nachricht schließen, sobald {darf.wartetAuf || 'der Absender'} geschrieben hat.</p>
+          )}
           {fehler && <p className="rf-fehler">{fehler}</p>}
         </div>
         {!isReadOnly && n && (
@@ -1745,7 +1853,8 @@ function NachrichtModal({ anfrage, meId, isReadOnly, onOeffnet, onClose, onAntwo
             <button className="abbrechen-btn" onClick={onClose}>Schließen</button>
             <div className="rf-fuss-mehr">
               {!erledigt && (
-                <button className="rf-btn-zurueck" onClick={onErledigt} title="Nachricht erledigt – Karte ins Archiv">
+                <button className="rf-btn-zurueck" onClick={schliessen} disabled={gesperrt}
+                  title={gesperrt ? darf.grund : 'Nachricht erledigt – Karte ins Archiv'}>
                   <Check size={14} /> Erledigt
                 </button>
               )}
@@ -1763,7 +1872,7 @@ function NachrichtModal({ anfrage, meId, isReadOnly, onOeffnet, onClose, onAntwo
 // ====================================================================
 // Muelleimer
 // ====================================================================
-function Muelleimer({ anfragen, isReadOnly, onCardClick, onZurueckholen }) {
+function Muelleimer({ anfragen, isReadOnly, meId, onCardClick, onZurueckholen }) {
   if (!anfragen.length) {
     return (
       <div className="muelleimer-leer">
@@ -1796,6 +1905,9 @@ function Muelleimer({ anfragen, isReadOnly, onCardClick, onZurueckholen }) {
                 )}
                 {bestaetigungGesendet(a) && (
                   <span className="muell-best-chip"><Mail size={11} /> Entwurf erstellt</span>
+                )}
+                {nachrichtZurKenntnis(a, meId) && (
+                  <span className="nm-kenntnis-chip"><Mail size={11} /> {nachrichtZurKenntnis(a, meId).von.name} hat die Nachricht erledigt – bitte zur Kenntnis nehmen</span>
                 )}
                 {zeigtBegruendung(a.ergebnis) && a.notizen && a.notizen.trim() && (
                   <span className="muell-notiz"><FileText size={11} /> {a.notizen.trim()}</span>

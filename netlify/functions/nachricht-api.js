@@ -10,8 +10,18 @@
 //        -> legt die Karte an, Absender = angemeldete Person
 //   POST { aktion: 'antwort', id, text }
 //        -> haengt eine Antwort an; eine erledigte Karte wird wieder offen
+//           (nachricht.geschlossen und nachricht.quittiert werden entfernt)
 //   POST { aktion: 'gelesen', id }
 //        -> merkt, dass die angemeldete Person den Stand gesehen hat
+//   POST { aktion: 'schliessen', id }
+//        -> Karte auf Erledigt setzen, protokolliert (nachricht.geschlossen +
+//           history). Regel siehe lib/nachricht-regeln.cjs: Der Absender darf
+//           immer, sonst nur, wer NICHT den letzten Verlaufseintrag geschrieben
+//           hat. Schliesst der Empfaenger, muss der Absender per 'quittieren'
+//           bestaetigen. Nicht fuer Nur-Lese-Zugang.
+//   POST { aktion: 'quittieren', id }
+//        -> Absender bestaetigt „Zur Kenntnis genommen" (nachricht.quittiert);
+//           auch fuer Nur-Lese-Zugang erlaubt.
 //
 // Feldgranular: Es werden nur nachricht, history (ein Eintrag) und beim
 // Wieder-Oeffnen status/ergebnis geschrieben – atomar in einem UPDATE.
@@ -23,8 +33,10 @@
 const crypto = require('crypto');
 const { zugriffPruefen, sitzungAus, CORS_HEADERS } = require('../lib/auth.cjs');
 const { dbAktiv, sql } = require('../lib/anfragen-db.cjs');
+const { darfNachrichtSchliessen } = require('../lib/nachricht-regeln.cjs');
 
 const QUELLE = 'Interne Nachricht';
+const ERGEBNIS_NACHRICHT = 'Interne Nachricht'; // wie beim bisherigen Erledigt-Button im Dashboard
 const STANDORTE = { 'bad-schwartau': 'Bad Schwartau', stockelsdorf: 'Stockelsdorf' };
 const MAX_TEXT = 2000;
 const MAX_BETREFF = 120;
@@ -80,7 +92,65 @@ exports.handler = async (event) => {
       return antwort(200, { success: true });
     }
 
+    // ---------------- quittieren ----------------
+    // Absender bestaetigt, dass er die Schliessung durch den Empfaenger gesehen hat.
+    if (aktion === 'quittieren') {
+      const id = text(p.id, 100);
+      if (!id) return antwort(400, { success: false, error: 'id fehlt' });
+      const zeilen = await sql().query('SELECT nachricht FROM anfragen WHERE id = $1 AND nachricht IS NOT NULL', [id]);
+      if (!zeilen.length) return antwort(404, { success: false, error: 'Nachricht nicht gefunden' });
+      const n = zeilen[0].nachricht || {};
+      if (!n.von || String(n.von.id) !== ich.id) {
+        return antwort(403, { success: false, error: 'Nur der Absender kann „Zur Kenntnis" bestätigen' });
+      }
+      await sql().query(
+        `UPDATE anfragen
+            SET nachricht = jsonb_set(nachricht, '{quittiert}',
+                  COALESCE(nachricht->'quittiert', '{}'::jsonb) || jsonb_build_object($2::text, $3::text))
+          WHERE id = $1 AND nachricht IS NOT NULL`,
+        [id, ich.id, jetzt]
+      );
+      return antwort(200, { success: true });
+    }
+
     if (sitzung.lesend) return antwort(403, { success: false, error: 'Nur Lesezugriff' });
+
+    // ---------------- schliessen ----------------
+    if (aktion === 'schliessen') {
+      const id = text(p.id, 100);
+      if (!id) return antwort(400, { success: false, error: 'id fehlt' });
+      const zeilen = await sql().query('SELECT status, nachricht FROM anfragen WHERE id = $1 AND nachricht IS NOT NULL', [id]);
+      if (!zeilen.length) return antwort(404, { success: false, error: 'Nachricht nicht gefunden' });
+      const n = zeilen[0].nachricht || {};
+      if (zeilen[0].status === 'Erledigt') {
+        return antwort(409, { success: false, error: 'Die Nachricht ist bereits erledigt', code: 'BEREITS_ERLEDIGT' });
+      }
+      const darf = darfNachrichtSchliessen(n, ich.id);
+      if (!darf.erlaubt) return antwort(403, { success: false, error: darf.grund, code: 'WARTET', wartetAuf: darf.wartetAuf });
+      const istAbsender = String(n.von.id) === ich.id;
+      const anzahl = Array.isArray(n.verlauf) ? n.verlauf.length : 0;
+      const geschlossen = { von: ich, zeit: jetzt };
+      const quittiert = istAbsender ? { [ich.id]: jetzt } : {};
+      const hist = { zeitstempel: jetzt, aktion: 'Status', von: ich.name, details: 'Erledigt (Nachricht geschlossen von ' + ich.name + ')' };
+      // Atomar; die Bedingung auf Verlaufslaenge und Status verhindert, dass eine
+      // zwischenzeitlich eingegangene Antwort ueberschrieben/uebergangen wird.
+      const r = await sql().query(
+        `UPDATE anfragen
+            SET status = 'Erledigt',
+                ergebnis = $6,
+                nachricht = jsonb_set(jsonb_set(nachricht, '{geschlossen}', $3::jsonb), '{quittiert}', $4::jsonb),
+                history = COALESCE(history, '[]'::jsonb) || jsonb_build_array($5::jsonb),
+                geaendert_am = now()
+          WHERE id = $1 AND nachricht IS NOT NULL AND status <> 'Erledigt'
+            AND jsonb_array_length(COALESCE(nachricht->'verlauf', '[]'::jsonb)) = $2::int
+          RETURNING id`,
+        [id, anzahl, JSON.stringify(geschlossen), JSON.stringify(quittiert), JSON.stringify(hist), ERGEBNIS_NACHRICHT]
+      );
+      if (!r.length) {
+        return antwort(409, { success: false, error: 'Die Nachricht wurde inzwischen geändert – bitte die Ansicht aktualisieren und erneut versuchen', code: 'GEAENDERT' });
+      }
+      return antwort(200, { success: true, id, geschlossen, quittiert });
+    }
 
     // ---------------- senden ----------------
     if (aktion === 'senden') {
@@ -140,7 +210,7 @@ exports.handler = async (event) => {
       const r = await sql().query(
         `UPDATE anfragen
             SET nachricht = jsonb_set(
-                  jsonb_set(nachricht, '{verlauf}', (
+                  jsonb_set(nachricht - 'geschlossen' - 'quittiert', '{verlauf}', (
                     SELECT COALESCE(jsonb_agg(e ORDER BY nr), '[]'::jsonb) FROM (
                       SELECT e, nr FROM jsonb_array_elements(COALESCE(nachricht->'verlauf', '[]'::jsonb) || jsonb_build_array($2::jsonb))
                         WITH ORDINALITY AS t(e, nr)
