@@ -166,9 +166,16 @@ async function anfragenSpeichern(liste, optionen = {}) {
     }
   }
 
+  // Interne Nachrichten (nachricht IS NOT NULL) duerfen ueber diesen Weg nicht
+  // auf „Erledigt" gesetzt werden: Das Schliessen laeuft ausschliesslich ueber
+  // nachricht-api (Aktion 'schliessen': Berechtigung + Protokoll). Status und
+  // Ergebnis bleiben dann wie in der Datenbank, der Rest wird normal gespeichert.
+  const nachrichtNichtErledigen = "(anfragen.nachricht IS NOT NULL AND EXCLUDED.status = 'Erledigt' AND anfragen.status <> 'Erledigt')";
   const updates = SPALTENLISTE
     .filter((s) => s !== 'id' && (s !== 'klaerung' || optionen.klaerungUebernehmen))
-    .map((s) => `${s} = EXCLUDED.${s}`)
+    .map((s) => (s === 'status' || s === 'ergebnis')
+      ? `${s} = CASE WHEN ${nachrichtNichtErledigen} THEN anfragen.${s} ELSE EXCLUDED.${s} END`
+      : `${s} = EXCLUDED.${s}`)
     .join(', ');
 
   const text = `

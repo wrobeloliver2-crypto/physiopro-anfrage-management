@@ -66,3 +66,19 @@
 .nm-popup-hinweis { margin:0; }
 @keyframes nm-popup-ein { from { opacity:0; } to { opacity:1; } }
 @media (prefers-reduced-motion: reduce) { .nm-popup-overlay { animation:none; } }
+
+/* ── Schließen-Regel: „Wartet auf …" und „Zur Kenntnis" ── */
+.nm-wartet { margin-top:6px; display:flex; align-items:center; gap:5px; font-size:11px; font-weight:500; color:var(--nm-dunkel); }
+.nm-wartet-modal { margin:10px 0 0; line-height:1.4; font-weight:400; }
+.akt-fertig:disabled { opacity:.45; cursor:not-allowed; }
+.rf-btn-zurueck:disabled { opacity:.5; cursor:not-allowed; }
+.nm-btn-klein { display:inline-flex; align-items:center; gap:4px; background:#fff; color:var(--nm-dunkel); border:1px solid var(--nm-rand); border-radius:100px; padding:5px 12px; font-family:var(--sans); font-size:11px; font-weight:500; cursor:pointer; transition:.15s; }
+.nm-btn-klein:hover { border-color:var(--nm); }
+.nm-btn-kenntnis { background:var(--nm); color:#fff; border-color:var(--nm); }
+.nm-btn-kenntnis:hover { background:var(--nm-dunkel); }
+.nm-hinweis-box { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; font-size:12.5px; color:var(--nm-dunkel); background:var(--nm-hell); border:1px solid var(--nm-rand); border-radius:9px; padding:10px 12px; margin-bottom:14px; }
+.nm-kenntnis-chip { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:500; color:var(--nm-dunkel); background:var(--nm-hell); border-radius:100px; padding:3px 10px; }
+.rf-zeile.nm-zeile-kenntnis { cursor:default; flex-wrap:wrap; }
+.nm-popup-kenntnis { cursor:default; }
+.nm-popup-kenntnis:hover { box-shadow:none; border-color:var(--nm-rand); }
+.nm-popup-aktionen { align-self:flex-end; display:inline-flex; gap:8px; }
