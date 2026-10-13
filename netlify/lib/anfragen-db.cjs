@@ -159,10 +159,23 @@ async function anfragenSpeichern(liste, optionen = {}) {
 
   if (!optionen.historyErsetzen) {
     const ids = zeilen.map((z) => z.id);
-    const bestehend = await db.query('SELECT id, history FROM anfragen WHERE id = ANY($1)', [ids]);
-    const map = new Map(bestehend.map((r) => [r.id, r.history]));
+    const bestehend = await db.query('SELECT id, history, status, (nachricht IS NOT NULL) AS ist_nachricht FROM anfragen WHERE id = ANY($1)', [ids]);
+    const map = new Map(bestehend.map((r) => [r.id, r]));
     for (const z of zeilen) {
-      z.history = historyVereinen(map.has(z.id) ? map.get(z.id) : [], z.history, optionen.autor);
+      const alt = map.get(z.id);
+      const altHistory = alt ? alt.history : [];
+      const bekannt = new Set(alsArray(altHistory).map(eintragSchluessel));
+      z.history = historyVereinen(altHistory, z.history, optionen.autor);
+      // Absicherung: Wird eine bestehende Karte auf Erledigt gesetzt, muss der Verlauf
+      // dazu einen Status-Eintrag mit Zeitstempel haben (das Archiv sortiert danach).
+      // Fehlt er in dem, was das Dashboard geschickt hat, ergaenzt ihn der Server.
+      if (alt && !alt.ist_nachricht && z.status === 'Erledigt' && alt.status !== 'Erledigt') {
+        const neuErledigt = z.history.some((e) => e && e.aktion === 'Status' && typeof e.details === 'string'
+          && e.details.includes('Erledigt') && !bekannt.has(eintragSchluessel(e)));
+        if (!neuErledigt) {
+          z.history.push({ zeitstempel: new Date().toISOString(), aktion: 'Status', von: optionen.autor || 'System', details: (alt.status || '?') + ' → Erledigt' });
+        }
+      }
     }
   }
 
@@ -191,7 +204,20 @@ async function anfragenSpeichern(liste, optionen = {}) {
 
 async function anfragenLaden() {
   const zeilen = await sql().query('SELECT * FROM anfragen ORDER BY reihenfolge');
-  return zeilen.map(zeileZuAnfrage);
+  return zeilen.map((z) => {
+    const a = zeileZuAnfrage(z);
+    // Erledigte Karten ohne Status-Eintrag im Verlauf (aelteres Speichern ohne Verlauf):
+    // Das Archiv sortiert nach dem Erledigt-Zeitpunkt. Als Ersatz dient die letzte
+    // Aenderung der Karte; sie wird als Eintrag mit von "System" angezeigt.
+    const hatErledigt = a.history.some((e) => e && e.aktion === 'Status' && typeof e.details === 'string' && e.details.includes('Erledigt') && e.zeitstempel);
+    if (a.status === 'Erledigt' && !a.nachricht && !hatErledigt && z.geaendert_am) {
+      const g = new Date(z.geaendert_am);
+      if (!isNaN(g.getTime())) {
+        a.history = [...a.history, { zeitstempel: g.toISOString(), aktion: 'Status', von: 'System', details: 'Erledigt (Zeitpunkt der letzten Änderung)' }];
+      }
+    }
+    return a;
+  });
 }
 
 async function anfragenLoeschen(ids) {
