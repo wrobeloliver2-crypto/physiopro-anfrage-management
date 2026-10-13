@@ -150,6 +150,32 @@ function historyVereinen(alt, neu, autor) {
 const SPALTENLISTE = [...TEXT_SPALTEN, 'history', 'klaerung'];
 const RECORD_DEF = [...TEXT_SPALTEN.map((s) => s + ' text'), 'history jsonb', 'klaerung jsonb'].join(', ');
 
+// Verlaufseintraege, die der Server selbst ergaenzt, wenn das Dashboard sie nicht mitschickt.
+function fehlendeEintraege(alt, z, bekannt, autor) {
+  const neu = z.history.filter((e) => e && typeof e === 'object' && !bekannt.has(eintragSchluessel(e)));
+  const hat = (...aktionen) => neu.some((e) => aktionen.includes(e.aktion));
+  const von = autor || 'System';
+  const zeit = new Date().toISOString();
+  const aus = [];
+  const anders = (a, b) => String(a || '') !== String(b || '');
+  if (anders(alt.status, z.status) && !(neu.some((e) => e.aktion === 'Status' && typeof e.details === 'string' && e.details.includes(String(z.status))))) {
+    aus.push({ zeitstempel: zeit, aktion: 'Status', von, details: (alt.status || '?') + ' → ' + z.status });
+  }
+  if (anders(alt.ergebnis, z.ergebnis) && z.ergebnis && !hat('Ergebnis')) {
+    aus.push({ zeitstempel: zeit, aktion: 'Ergebnis', von, details: z.ergebnis });
+  }
+  if (anders(alt.schritt, z.schritt) && z.schritt && !hat('Schritt')) {
+    aus.push({ zeitstempel: zeit, aktion: 'Schritt', von, details: z.schritt });
+  }
+  if (anders(alt.bearbeiter, z.bearbeiter) && z.bearbeiter && !hat('Aktualisiert', 'Bearbeiter')) {
+    aus.push({ zeitstempel: zeit, aktion: 'Bearbeiter', von, details: (alt.bearbeiter || 'Unzugewiesen') + ' → ' + z.bearbeiter });
+  }
+  if (anders(alt.weitergeleitet_an, z.weitergeleitet_an) && z.weitergeleitet_an && !hat('Weitergeleitet')) {
+    aus.push({ zeitstempel: zeit, aktion: 'Weitergeleitet', von, details: 'an ' + z.weitergeleitet_an });
+  }
+  return aus;
+}
+
 async function anfragenSpeichern(liste, optionen = {}) {
   const db = sql();
   if (!Array.isArray(liste) || !liste.length) return 0;
@@ -159,23 +185,17 @@ async function anfragenSpeichern(liste, optionen = {}) {
 
   if (!optionen.historyErsetzen) {
     const ids = zeilen.map((z) => z.id);
-    const bestehend = await db.query('SELECT id, history, status, (nachricht IS NOT NULL) AS ist_nachricht FROM anfragen WHERE id = ANY($1)', [ids]);
+    const bestehend = await db.query('SELECT id, history, status, ergebnis, schritt, bearbeiter, weitergeleitet_an, (nachricht IS NOT NULL) AS ist_nachricht FROM anfragen WHERE id = ANY($1)', [ids]);
     const map = new Map(bestehend.map((r) => [r.id, r]));
     for (const z of zeilen) {
       const alt = map.get(z.id);
       const altHistory = alt ? alt.history : [];
       const bekannt = new Set(alsArray(altHistory).map(eintragSchluessel));
       z.history = historyVereinen(altHistory, z.history, optionen.autor);
-      // Absicherung: Wird eine bestehende Karte auf Erledigt gesetzt, muss der Verlauf
-      // dazu einen Status-Eintrag mit Zeitstempel haben (das Archiv sortiert danach).
-      // Fehlt er in dem, was das Dashboard geschickt hat, ergaenzt ihn der Server.
-      if (alt && !alt.ist_nachricht && z.status === 'Erledigt' && alt.status !== 'Erledigt') {
-        const neuErledigt = z.history.some((e) => e && e.aktion === 'Status' && typeof e.details === 'string'
-          && e.details.includes('Erledigt') && !bekannt.has(eintragSchluessel(e)));
-        if (!neuErledigt) {
-          z.history.push({ zeitstempel: new Date().toISOString(), aktion: 'Status', von: optionen.autor || 'System', details: (alt.status || '?') + ' → Erledigt' });
-        }
-      }
+      // Absicherung: Aenderungen an Status, Ergebnis, Schritt, Bearbeiter und Weiterleitung
+      // muessen im Verlauf stehen. Hat das Dashboard dazu keinen neuen Eintrag mitgeschickt,
+      // traegt der Server ihn selbst ein. Mitgeschickte Eintraege haben Vorrang (keine Doppelten).
+      if (alt && !alt.ist_nachricht) z.history.push(...fehlendeEintraege(alt, z, bekannt, optionen.autor));
     }
   }
 
